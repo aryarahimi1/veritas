@@ -17,7 +17,8 @@
     "vite": "^5.2.0"
   },
   "dependencies": {
-    "@stellar/stellar-sdk": "12.3.0",
+    "@stellar/freighter-api": "^6.0.1",
+    "@stellar/stellar-sdk": "^16.0.1",
     "snarkjs": "^0.7.4"
   }
 }

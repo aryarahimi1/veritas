@@ -7,7 +7,11 @@ Recommendation 16 (the "Travel Rule") forces the sender to hand over the custome
 details. Today that data moves through off-chain networks (Notabene, Sygna, TRP) in the
 [IVMS101](https://www.intervasp.org/) format — but there is **no shared, verifiable proof that the
 exchange actually happened.** Each VASP just trusts its own private database, which a regulator must
-take on faith and which can be quietly edited or "lost."
+take on faith and which can be quietly edited or "lost" — and the stakes are concrete: in November 2023
+Binance reached a $4.3B settlement with the U.S. DOJ, FinCEN, CFTC, and OFAC (FinCEN's $3.4B share alone
+the largest Bank Secrecy Act enforcement action in U.S. history), with AML-program, registration, and
+SAR-filing failures cited among the core violations — exactly the kind of cross-border customer-data
+breakdown the Travel Rule exists to prevent.
 
 Veritas adds the missing piece: a **single zero-knowledge proof, verified inside a Soroban smart
 contract and anchored to a settlement**, that attests — *without revealing any personal data* — that
@@ -50,10 +54,11 @@ trying to move privately.
 - **Simulated for the demo:** the participating VASPs, the licensing registry, and the customer PII
   (synthetic IVMS101). You can't onboard a real licensed exchange for a hackathon — but the mocked part
   is only the *participants*, never the cryptography or the on-chain artifact.
-- Proofs are **pre-generated** (proving on-stage is avoided for reliability). See
-  **[SECURITY.md](./SECURITY.md)** for the full threat model and the items deferred to a production
-  build (in-circuit counterparty signature, verifiable encryption for the regulator, settlement↔payment
-  binding).
+- Proofs are generated **live, in-browser** (Groth16/BLS12-381 via snarkjs) and submitted as a **fresh
+  transaction on every run** — not pre-generated. If that live call fails, the demo falls back to a
+  cached, previously-anchored proof rather than hard-failing. See **[SECURITY.md](./SECURITY.md)** for
+  the full threat model and the items deferred to a production build (in-circuit counterparty signature,
+  verifiable encryption for the regulator, settlement↔payment binding).
 
 ## Architecture
 

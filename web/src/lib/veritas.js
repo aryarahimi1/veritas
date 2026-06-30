@@ -1,80 +1,164 @@
-// Frontend glue to the REAL on-chain Veritas deployment.
-//
-// Proofs are pre-generated (see SECURITY.md). The genuinely-live, judge-verifiable parts are:
-//  - the compliance anchor transaction already on-chain (linked to stellar.expert), and
-//  - a LIVE read of get_attestation from the deployed contract via Soroban RPC.
-// The regulator opening reconstructs the IVMS101 attestation and (conceptually) checks it against the
-// on-chain attCommitment.
+// Live engine: in-browser ZK proof -> fresh on-chain submission. Verified end-to-end (see live-test.mjs).
+// snarkjs runs from the prebuilt /snarkjs.min.js (avoids bundling ffjavascript's node builtins).
+import { Client, networks, Keypair, contract } from '$lib/veritas-client/dist/index.js';
+import { buildInput, randomSettlementRef } from './witness.js';
+import { recomputeAttCommitment } from './attestation.js';
+import { encodeProof } from './proof.js';
+import { IVMS101_ATTESTATION } from './fixtures.js';
 
-import * as Sdk from '@stellar/stellar-sdk';
-import {
-  VERITAS_CONTRACT,
-  TX,
-  PUBLIC_SIGNALS,
-  PUBLIC_RECEIPT,
-  IVMS101_ATTESTATION
-} from './fixtures.js';
+const { basicNodeSigner } = contract;
+const RPC = 'https://soroban-testnet.stellar.org';
+const { networkPassphrase, contractId } = networks.testnet;
+const WASM = '/circuit/veritas.wasm';
+const ZKEY = '/circuit/veritas_final.zkey';
 
-const RPC_URL = 'https://soroban-testnet.stellar.org';
-const NETWORK_PASSPHRASE = Sdk.Networks.TESTNET;
-// A funded testnet account used only as the (read-only) simulation source — no signing.
-const READ_SOURCE = 'GDJ4JVGP5B3CRLQH5ET6HZF4AC762JPRGVCMIDUD6WYMFPQIIZHCWILJ';
+let _snarkjs;
+let _account; // funded once and reused
+let _wallet = 'ephemeral'; // 'ephemeral' | 'freighter'
+export const setWallet = (kind) => { _wallet = kind; _account = null; };
+export const getWallet = () => _wallet;
 
-const delay = (ms) => new Promise((r) => setTimeout(r, ms));
-
-/** Anchor the (pre-generated) proof — returns the real on-chain compliance-anchor tx. */
-export async function anchorOnChain() {
-  await delay(1100);
-  return { txHash: TX.submit, contract: VERITAS_CONTRACT };
-}
-
-/** LIVE read of the public compliance receipt from the deployed contract. Falls back to the cached
- *  on-chain values if RPC is unavailable (CORS/network) — the values are identical either way. */
-export async function readOnChainAttestation() {
-  try {
-    const server = new Sdk.rpc.Server(RPC_URL);
-    const account = await server.getAccount(READ_SOURCE);
-    const contract = new Sdk.Contract(VERITAS_CONTRACT);
-    const settle = Sdk.nativeToScVal(BigInt(PUBLIC_SIGNALS.settlementRef), { type: 'u256' });
-    const tx = new Sdk.TransactionBuilder(account, {
-      fee: '100',
-      networkPassphrase: NETWORK_PASSPHRASE
-    })
-      .addOperation(contract.call('get_attestation', settle))
-      .setTimeout(30)
-      .build();
-    const sim = await server.simulateTransaction(tx);
-    if (Sdk.rpc.Api.isSimulationSuccess(sim) && sim.result?.retval) {
-      const native = Sdk.scValToNative(sim.result.retval);
-      if (native) {
-        return {
-          live: true,
-          bracket: Number(native.bracket),
-          attCommitment: native.att_commitment?.toString(),
-          settlementRef: native.settlement_ref?.toString(),
-          submitter: native.submitter
-        };
-      }
-    }
-  } catch (e) {
-    console.warn('live read unavailable, using cached on-chain values:', e?.message || e);
+async function loadSnarkjs() {
+  if (_snarkjs) return _snarkjs;
+  if (!window.snarkjs) {
+    await new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = '/snarkjs.min.js';
+      s.onload = res;
+      s.onerror = () => rej(new Error('failed to load snarkjs'));
+      document.head.appendChild(s);
+    });
   }
+  return (_snarkjs = window.snarkjs);
+}
+
+async function ephemeral() {
+  const kp = Keypair.random();
+  const res = await fetch(`https://friendbot.stellar.org/?addr=${kp.publicKey()}`); // create + fund on testnet
+  if (!res.ok) throw new Error(`friendbot funding failed (${res.status})`);
+  const { signTransaction } = basicNodeSigner(kp, networkPassphrase);
+  return { publicKey: kp.publicKey(), signTransaction, kind: 'ephemeral' };
+}
+
+// ponytail: optional Freighter path — needs the extension (testnet + funded). freighter-api resolves
+// with {error} rather than throwing, so check explicitly and throw -> ensureAccount falls back to ephemeral.
+async function freighter() {
+  const f = await import('@stellar/freighter-api');
+  const access = await f.requestAccess();
+  if (access?.error) throw new Error(access.error);
+  const net = await f.getNetworkDetails();
+  if (net?.networkPassphrase !== networkPassphrase) throw new Error('switch Freighter to Testnet');
+  const { address, error } = await f.getAddress();
+  if (error || !address) throw new Error(error || 'no Freighter address');
+  const signTransaction = async (xdr) => {
+    const r = await f.signTransaction(xdr, { networkPassphrase, address });
+    if (r?.error) throw new Error(r.error);
+    return { signedTxXdr: r.signedTxXdr ?? r, signerAddress: address };
+  };
+  return { publicKey: address, signTransaction, kind: 'freighter' };
+}
+
+async function ensureAccount() {
+  if (_account) return _account;
+  if (_wallet === 'freighter') {
+    try {
+      return (_account = await freighter());
+    } catch {
+      _wallet = 'ephemeral'; // extension missing/denied/wrong-network -> graceful fallback
+    }
+  }
+  return (_account = await ephemeral());
+}
+
+const newClient = (acct) =>
+  new Client({ contractId, rpcUrl: RPC, networkPassphrase, publicKey: acct.publicKey, signTransaction: acct.signTransaction });
+
+/** The headline path: prove `amount` in-browser, submit a BRAND-NEW tx. Throws on failure (caller falls back). */
+export async function anchorLive(amount, onStep = () => {}) {
+  onStep('loading');
+  const snarkjs = await loadSnarkjs();
+  const acct = await ensureAccount();
+  onStep('proving');
+  const settlementRef = randomSettlementRef();
+  const { proof, publicSignals } = await snarkjs.groth16.fullProve(buildInput(amount, settlementRef), WASM, ZKEY);
+  onStep('submitting');
+  const enc = encodeProof(proof);
+  const tx = await newClient(acct).submit_compliance({
+    submitter: acct.publicKey,
+    proof: { a: enc.a, b: enc.b, c: enc.c },
+    pub_signals: publicSignals.map((s) => BigInt(s)),
+    settlement_ref: settlementRef
+  });
+  const sent = await tx.signAndSend();
   return {
-    live: false,
-    bracket: PUBLIC_RECEIPT.bracket,
-    attCommitment: PUBLIC_RECEIPT.attCommitment,
-    settlementRef: PUBLIC_RECEIPT.settlementRef,
-    submitter: READ_SOURCE
+    live: true,
+    txHash: sent.sendTransactionResponse?.hash,
+    account: acct.publicKey,
+    kind: acct.kind, // reflects a silent ephemeral fallback
+    bracket: Number(publicSignals[0]),
+    attCommitment: publicSignals[2],
+    settlementRef: publicSignals[3],
+    amount
   };
 }
 
-/** Regulator opens the attestation with the view key — reconstructs the full IVMS101 record and
- *  checks it against the on-chain commitment. */
-export async function openWithViewKey() {
-  await delay(800);
+/** Live negative demo: tamper the committed attestation -> the deployed contract rejects (ProofInvalid).
+ *  Distinguishes a real on-chain rejection from a local/network failure so the UI can't over-claim. */
+export async function tamperReject(amount) {
+  const snarkjs = await loadSnarkjs();
+  const acct = await ensureAccount();
+  const settlementRef = randomSettlementRef();
+  const { proof, publicSignals } = await snarkjs.groth16.fullProve(buildInput(amount, settlementRef), WASM, ZKEY);
+  const enc = encodeProof(proof);
+  const bad = publicSignals.map((s) => BigInt(s));
+  bad[2] = bad[2] + 1n; // corrupt attCommitment (still canonical) -> pairing fails on-chain
+  try {
+    const tx = await newClient(acct).submit_compliance({
+      submitter: acct.publicKey,
+      proof: { a: enc.a, b: enc.b, c: enc.c },
+      pub_signals: bad,
+      settlement_ref: settlementRef
+    });
+    await tx.signAndSend();
+    return { rejected: false }; // should not happen
+  } catch (e) {
+    const m = String(e?.message || e);
+    const onChain = m.includes('#3') || /ProofInvalid|Error\(Contract/i.test(m);
+    return onChain
+      ? { rejected: true, reason: /ProofInvalid/i.test(m) || m.includes('#3') ? 'ProofInvalid' : m.split('\n')[0] }
+      : { rejected: false, localError: m.split('\n')[0] };
+  }
+}
+
+/** Live read of the public receipt — simulate-only, no account/signing needed. */
+export async function readAttestation(settlementRef) {
+  const tx = await new Client({ contractId, rpcUrl: RPC, networkPassphrase }).get_attestation({
+    settlement_ref: BigInt(settlementRef)
+  });
+  const a = tx.result;
+  if (!a) return null;
   return {
-    ivms: IVMS101_ATTESTATION,
-    commitment: PUBLIC_SIGNALS.attCommitment,
-    matchesCommitment: true
+    bracket: Number(a.bracket),
+    attCommitment: a.att_commitment?.toString(),
+    settlementRef: a.settlement_ref?.toString(),
+    submitter: a.submitter,
+    ledger: a.ledger
   };
+}
+
+/** Regulator opens the attestation with the view key. (Commitment-open demo; see SECURITY.md.)
+ * `run` is the just-anchored result ({ amount, settlementRef, bracket, attCommitment }). The revealed
+ * transfer.amount is overridden with THIS run's actual amount — every other field of the fixture
+ * (identities, addresses, LEIs, …) is simulated and constant across runs, so it's left untouched.
+ *
+ * Also independently recomputes attCommitment (see attestation.js) from the revealed fields and checks
+ * it against the attCommitment that was actually anchored on-chain for this run, so "it's the same
+ * cryptographic object" is verifiable on-screen instead of just asserted. */
+export async function openWithViewKey(run) {
+  const ivms = {
+    ...IVMS101_ATTESTATION,
+    transfer: { ...IVMS101_ATTESTATION.transfer, amount: Number(run?.amount).toFixed(2) }
+  };
+  const commitmentMatch = recomputeAttCommitment(run) === String(run.attCommitment);
+  return { ivms, commitmentMatch };
 }

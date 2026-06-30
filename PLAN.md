@@ -32,7 +32,7 @@ failure mode.
 - [x] **Threshold / bracket logic over the HIDDEN amount** — the genuinely-ZK core
 - [x] IVMS101 data commitment + receiving-VASP acknowledgement binding
 - [x] Regulator-view-key attestation commitment (public output)
-- [x] Compile `--prime bls12381`, trusted setup, export verification key (8530 non-linear constraints, nPublic=6)
+- [x] Compile `--prime bls12381`, trusted setup, export verification key (8750 non-linear constraints, nPublic=5)
 - [x] Poseidon-free fixture generator + reusable snarkjs-JSON→Soroban-bytes encoder (`tools/encode`)
 - [x] Incorporate Code Reviewer + Security Engineer findings (range-constrain amount+threshold, enforce leafA≠leafB, bind amount/bracket/both leaves into the commitment, drop the constant `compliant` output)
 
@@ -72,7 +72,8 @@ Phase 2.
 - [x] Real proof artifacts pre-generated (proving on-stage avoided per SECURITY.md)
 
 **DoD MET:** the pipeline produces a real proof that verifies on-chain; the browser consumes the
-pre-generated proof + the real IVMS101 attestation. (Live in-browser proving deferred for reliability.)
+pre-generated proof + the real IVMS101 attestation. (Live in-browser proving deferred for reliability —
+**superseded by Phase 7 below**, which moved proving live into the browser on every run.)
 
 ---
 
@@ -105,6 +106,22 @@ pre-generated proof + the real IVMS101 attestation. (Live in-browser proving def
 - [ ] 2–3 min demo video (owned by Arya)
 
 **DoD:** submitted on DoraHacks.
+
+---
+
+## Phase 7 — Live upgrade (in-browser proving + a fresh on-chain tx every run) ✅ DONE
+Built to kill the "feels like mock data" critique. Each run now:
+- generates the Groth16 proof **in the browser** (snarkjs from `/snarkjs.min.js`) from a user-chosen amount,
+- submits it **live** to the deployed contract via the generated TS bindings, signed by an ephemeral
+  Friendbot-funded keypair (default) or an **optional Freighter wallet** — a brand-new transaction every run,
+- adds a **live tamper demo** (the real contract rejects a forged proof on-chain) and a session **compliance
+  log**, with graceful fallback to the cached on-chain proof if that live run fails for any reason —
+  network, funding, wallet, or otherwise (A-with-fallback),
+- redesigned as **"Two Ledgers"** — a light public ledger (redacted) vs a dark regulator vault that opens with the view key.
+
+De-risked by a JS↔Rust encoder **byte-match** + a **Node end-to-end test** (real fresh tx), and audited by
+Code-Review + Security-Engineer passes (no Critical/High/Medium). Lean per ponytail (generated bindings over
+hand-rolled ScVals, CSS over animation libs, one byte-match check). Needed SDK bump to 16.0.1 (Protocol 23).
 
 ---
 

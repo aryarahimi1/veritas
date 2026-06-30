@@ -22,8 +22,9 @@ circuits/build/
 *.sym
 circuits/**/*_js/
 circuits/**/*_cpp/
-# keep the exported verification key + final wasm if small — uncomment to track:
-# !circuits/build/verification_key.json
+# but the web app's in-browser proving artifacts MUST be committed (served as static assets):
+!web/static/circuit/
+!web/static/circuit/*.zkey
 
 # Secrets / local env
 .env

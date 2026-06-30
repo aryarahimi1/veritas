@@ -1,6 +1,8 @@
 // Demo fixtures wired to the REAL on-chain Veritas deployment (Stellar testnet).
-// Proofs are pre-generated (see SECURITY.md): the live, verifiable parts are the on-chain verify +
-// anchor and the regulator-view-key opening. Everything here a judge can independently confirm.
+// Every run proves live in-browser and submits a fresh tx (see veritas.js's anchorLive); these fixtures
+// back the graceful cached-fallback path (TX.submit, PUBLIC_SIGNALS) used only if that live call fails,
+// plus the synthetic IVMS101 attestation the regulator view-key reveals. See SECURITY.md for the full
+// real-vs-simulated breakdown. Everything here is independently checkable by a judge.
 
 export const NETWORK = 'testnet';
 export const EXPLORER = 'https://stellar.expert/explorer/testnet';

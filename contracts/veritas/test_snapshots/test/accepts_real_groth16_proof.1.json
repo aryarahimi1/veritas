@@ -1,0 +1,416 @@
+{
+  "generators": {
+    "address": 3,
+    "nonce": 0
+  },
+  "auth": [
+    [],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+              "function_name": "submit_compliance",
+              "args": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "a"
+                      },
+                      "val": {
+                        "bytes": "060c363cad5160a51ea6459be46b2c2b1554734ac53dc2e62730ba3210991e3844dc80ecda21ca66fe5a3c2aa9e159f615ee9602f70e226f3c1325bc7946d1c9af374004d4da4eb7954bf04b90bc9059f7941ef9bb118c21f7d2a37a70dc7f9a"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "b"
+                      },
+                      "val": {
+                        "bytes": "116c35b4f1e5927a86abda825dbc8848d02ddbae950a875ca91779e14695a1d655c10209bf04fdeff926f973becc49141133150f9a84e6efe8c0ea0fac7a279bf23857e920f03d176a53745b96de9e6e0f841f6643ee79ac5eb5d660d935fae7097b09be47dd8c39933bd149f8b1bda7bc19e7f6e47cf11c855fe2004d49c64dfc06b99862b67b34da1afb1e65f57cc40ee6938dff541c52e896d34213ebaff7493334576839c328cbaf1655109d30ae6f7d6b1f4690a784f898e3b3e4858655"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "c"
+                      },
+                      "val": {
+                        "bytes": "0d4765333969864dfb61808a3585a76178d96148798aaea589e443de05feff6e44cdf74f0f160e69005df38eb8d08b601253a177478be72a44e6e0a16ef250f47c78ada5ae58e77262a286258288c9dc1c9ad11650cc1a68c21007b7b9f43e57"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "vec": [
+                    {
+                      "u256": {
+                        "hi_hi": 0,
+                        "hi_lo": 0,
+                        "lo_hi": 0,
+                        "lo_lo": 1
+                      }
+                    },
+                    {
+                      "u256": {
+                        "hi_hi": 7213213151729157644,
+                        "hi_lo": 6806268738893286972,
+                        "lo_hi": 9114149340118271135,
+                        "lo_lo": 3774081292510309738
+                      }
+                    },
+                    {
+                      "u256": {
+                        "hi_hi": 861593293758252798,
+                        "hi_lo": 5883559885556056173,
+                        "lo_hi": 5508527835699859638,
+                        "lo_lo": 7119012851283332751
+                      }
+                    },
+                    {
+                      "u256": {
+                        "hi_hi": 0,
+                        "hi_lo": 7562612,
+                        "lo_hi": 8389191726411969581,
+                        "lo_lo": 8243107037239586865
+                      }
+                    },
+                    {
+                      "u256": {
+                        "hi_hi": 0,
+                        "hi_lo": 0,
+                        "lo_hi": 0,
+                        "lo_lo": 1000
+                      }
+                    }
+                  ]
+                },
+                {
+                  "u256": {
+                    "hi_hi": 0,
+                    "hi_lo": 7562612,
+                    "lo_hi": 8389191726411969581,
+                    "lo_lo": 8243107037239586865
+                  }
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
+    []
+  ],
+  "ledger": {
+    "protocol_version": 22,
+    "sequence_number": 0,
+    "timestamp": 0,
+    "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
+    "base_reserve": 0,
+    "min_persistent_entry_ttl": 4096,
+    "min_temp_entry_ttl": 16,
+    "max_entry_ttl": 6312000,
+    "ledger_entries": [
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "Attestation"
+                },
+                {
+                  "u256": {
+                    "hi_hi": 0,
+                    "hi_lo": 7562612,
+                    "lo_hi": 8389191726411969581,
+                    "lo_lo": 8243107037239586865
+                  }
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "Attestation"
+                    },
+                    {
+                      "u256": {
+                        "hi_hi": 0,
+                        "hi_lo": 7562612,
+                        "lo_hi": 8389191726411969581,
+                        "lo_lo": 8243107037239586865
+                      }
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "att_commitment"
+                      },
+                      "val": {
+                        "u256": {
+                          "hi_hi": 861593293758252798,
+                          "hi_lo": 5883559885556056173,
+                          "lo_hi": 5508527835699859638,
+                          "lo_lo": 7119012851283332751
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "bracket"
+                      },
+                      "val": {
+                        "u32": 1
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "ledger"
+                      },
+                      "val": {
+                        "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "settlement_ref"
+                      },
+                      "val": {
+                        "u256": {
+                          "hi_hi": 0,
+                          "hi_lo": 7562612,
+                          "lo_hi": 8389191726411969581,
+                          "lo_lo": 8243107037239586865
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "submitter"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          518400
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+            "key": "ledger_key_contract_instance",
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+                "key": "ledger_key_contract_instance",
+                "durability": "persistent",
+                "val": {
+                  "contract_instance": {
+                    "executable": {
+                      "wasm": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    },
+                    "storage": [
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "Admin"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "RegistryRoot"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u256": {
+                            "hi_hi": 7213213151729157644,
+                            "hi_lo": 6806268738893286972,
+                            "lo_hi": 9114149340118271135,
+                            "lo_lo": 3774081292510309738
+                          }
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "Vk"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "alpha"
+                              },
+                              "val": {
+                                "bytes": "130af89733820650fc0d649c2b478516905335eb0993d5a56df84abad0c7269ad23f1c51949d74b738143a681ca7784102779af969ab7b882d18a10f77a8f60a75d4e80ebd241bc8855c5a1e4dda3532e235e8ab35ec9831996771875934ec2d"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "beta"
+                              },
+                              "val": {
+                                "bytes": "130d8017d5b135904c1f54fbd713b8f72d5a7e11786d711171cfdab40b94f5c7919b626e4f4f24ddba9782029246a95e0eb1d1815051a155821d08bcf8234b4275cfbf7c66d118e8f5c29740e457db413b9d44fef4eb866c7a321341c4fdf9fa1314d9190af5c744597f50a7bec00942d57b4477a681caeea1f77f20940fd53412caca68f4801606299a03574f38f30217d519494f82c38d15283a2333a02be8eb73f5e14b401bab2f8aad274655a71814877c349e635f902147e9199b3b4d3d"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "delta"
+                              },
+                              "val": {
+                                "bytes": "0ae22ecc198dce6d27c197e3c9520cfa5a4a513460929d3a3bdedb2c9ff4b0689d9f08b7522de1191b8b39762add604c0bb47a21cb0db51c9b9e509ccb47a9bb9b51ffa1fc0f19046acf17a75a30c55629179a4e05c84852adac90fee4bb20761372867249c809aad252566ca3d2a6cae6bcab9f8a7c3673001838b7bf758d93c4b75b057de6474d378170f69c1381a9123318d5bc515e8538ec8de3802c2bb7b21896d7bc891f9e844abf7c92a3fa121370482f13e713b912a1b8162a20dc7c"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "gamma"
+                              },
+                              "val": {
+                                "bytes": "13e02b6052719f607dacd3a088274f65596bd0d09920b61ab5da61bbdc7f5049334cf11213945d57e5ac7d055d042b7e024aa2b2f08f0a91260805272dc51051c6e47ad4fa403b02b4510b647ae3d1770bac0326a805bbefd48056c8c121bdb80606c4a02ea734cc32acd2b02bc28b99cb3e287e85a763af267492ab572e99ab3f370d275cec1da1aaa9075ff05f79be0ce5d527727d6e118cc9cdc6da2e351aadfd9baa8cbdd3a76d429a695160d12c923ac9cc3baca289e193548608b82801"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "ic"
+                              },
+                              "val": {
+                                "vec": [
+                                  {
+                                    "bytes": "02c43a522984eff557e3af562a3259a7a12607fa905d1ccde792d5989a4168aa9d94b97053aa098838f332a68b7ad87303b0e3be9670d16f466af8bed3c4c6ccf1e0d979c52e93261438732c8892c7c3f91a89a0b2e30140b6ad0487a463889e"
+                                  },
+                                  {
+                                    "bytes": "14b2caf092a77d9f5fee47fe6c26d98d85fc4af5901569fe388ccfececfd70e4c8a95bd19dcd2d40ccae296351d39f281283bf09732b7f5a1a989aab11c5430dfc3eef358eb7c764649075e1f22af4cd5fcc8db9b74ba8f21e6bb749156189fc"
+                                  },
+                                  {
+                                    "bytes": "028f4216581db6491dd3446432864d07d728da2d578f239a2413d38c5dce97324f6feaa7e782fd47a3e746edbcce21cc046acf22e7beae5f9cd46923e06e5080598c861a3cfff9d3f39cdd7dac07ee70420e0001fbb177fb2e23f82bf6a02373"
+                                  },
+                                  {
+                                    "bytes": "0c8f03dc576df5d5995a9a5164b7775623acd40273c58cb3f9f171b23cc1b0a76b2f3831878126503059ba2fea2115f608508bd4d28ef46c5df4f51ad6a4737c3d38d6617b7631effcd8baedaef0d014c579e8fec39c003502014710699d22f2"
+                                  },
+                                  {
+                                    "bytes": "18e69bfea7486624286be2042986ea8b27d9b987450619e95cd0e82b1e6a1c5a9346c53a68c95605652e6a09e071394c192a5f88ce50bb01cfa3f40be980c0fceb98bd674ad9441752ae6de6c8cdedb011fb6c745f4f8e57cf3febcb655f1a48"
+                                  },
+                                  {
+                                    "bytes": "051cf71eefc41af0a49e1016a455ebd0e2d182a8a37c2a85c4dc983bd378d557fa9aa63d11ab7fb5f22d927e51d24872158933a9329d9dc79550f83c6dfae59f3e1efac8d7e638b84e191bcdebf558d6a557c2b298566dfb008fb40338603f77"
+                                  }
+                                ]
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          518400
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+            "key": {
+              "ledger_key_nonce": {
+                "nonce": 801925984706572462
+              }
+            },
+            "durability": "temporary"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+                "key": {
+                  "ledger_key_nonce": {
+                    "nonce": 801925984706572462
+                  }
+                },
+                "durability": "temporary",
+                "val": "void"
+              }
+            },
+            "ext": "v0"
+          },
+          6311999
+        ]
+      ],
+      [
+        {
+          "contract_code": {
+            "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_code": {
+                "ext": "v0",
+                "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "code": ""
+              }
+            },
+            "ext": "v0"
+          },
+          518400
+        ]
+      ]
+    ]
+  },
+  "events": []
+}

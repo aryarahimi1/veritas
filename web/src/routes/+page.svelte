@@ -1,95 +1,97 @@
 <script>
-  import { anchorOnChain, readOnChainAttestation, openWithViewKey } from '$lib/veritas.js';
-  import { TRANSFER, EXPLORER, VERITAS_CONTRACT, PUBLIC_SIGNALS } from '$lib/fixtures.js';
+  import { onMount } from 'svelte';
+  import { anchorLive, tamperReject, readAttestation, openWithViewKey, setWallet } from '$lib/veritas.js';
+  import { TRANSFER, EXPLORER, VERITAS_CONTRACT, PUBLIC_SIGNALS, TX } from '$lib/fixtures.js';
 
-  let stage = 'idle'; // idle -> anchoring -> anchored
+  let amount = 4200;
+  let walletKind = 'ephemeral';
+  const pickWallet = (k) => { walletKind = k; setWallet(k); };
+  let stage = 'idle'; // idle | loading | proving | submitting | anchored
   let busy = false;
   let error = '';
-  let txHash = '';
-  let receipt = null;
-  let liveRead = null;
+  let result = null;
+  let live = false;
+  let anchoredAt = 0;
   let regulator = false;
   let opened = null;
+  let liveRead = null;
+  let tamper = null;
+  let log = [];
 
-  const short = (s, n = 10) => (s && String(s).length > 2 * n ? `${String(s).slice(0, n)}…${String(s).slice(-n)}` : s ?? '—');
+  let now = Date.now();
+  onMount(() => {
+    const i = setInterval(() => (now = Date.now()), 1000);
+    return () => clearInterval(i);
+  });
+  $: ageSec = anchoredAt ? Math.max(0, Math.floor((now - anchoredAt) / 1000)) : 0;
 
-  // Flatten the IVMS101 record into a render-safe view (optional chaining everywhere) so the reveal —
-  // the climax of the demo — can never throw on a missing field.
-  $: orig = opened?.ivms?.originator?.originatorPersons?.[0]?.naturalPerson;
-  $: ben = opened?.ivms?.beneficiary?.beneficiaryPersons?.[0]?.naturalPerson;
-  $: view = opened
-    ? {
-        origName:
-          [orig?.name?.nameIdentifier?.[0]?.secondaryIdentifier, orig?.name?.nameIdentifier?.[0]?.primaryIdentifier]
-            .filter(Boolean)
-            .join(' ') || '—',
-        origAddr:
-          [orig?.geographicAddress?.[0]?.addressLine?.[0], orig?.geographicAddress?.[0]?.townName]
-            .filter(Boolean)
-            .join(', ') + (orig?.geographicAddress?.[0]?.country ? ` (${orig.geographicAddress[0].country})` : ''),
-        origDob: orig?.dateAndPlaceOfBirth?.dateOfBirth ?? '—',
-        origVasp: `${opened?.ivms?.originatingVASP?.name ?? '—'} · LEI ${opened?.ivms?.originatingVASP?.lei ?? '—'}`,
-        benName:
-          [ben?.name?.nameIdentifier?.[0]?.secondaryIdentifier, ben?.name?.nameIdentifier?.[0]?.primaryIdentifier]
-            .filter(Boolean)
-            .join(' ') || '—',
-        benAddr:
-          [ben?.geographicAddress?.[0]?.addressLine?.[0], ben?.geographicAddress?.[0]?.townName]
-            .filter(Boolean)
-            .join(', ') + (ben?.geographicAddress?.[0]?.country ? ` (${ben.geographicAddress[0].country})` : ''),
-        benVasp: `${opened?.ivms?.beneficiaryVASP?.name ?? '—'} · LEI ${opened?.ivms?.beneficiaryVASP?.lei ?? '—'}`,
-        amount: opened?.ivms?.transfer?.amount ?? '—',
-        asset: opened?.ivms?.transfer?.asset ?? '',
-        version: opened?.ivms?.ivms101Version ?? '',
-        matches: opened?.matchesCommitment
-      }
-    : null;
+  const short = (s, n = 7) => (s && String(s).length > 2 * n ? `${String(s).slice(0, n)}…${String(s).slice(-n)}` : s ?? '—');
+  const stageLabel = { loading: 'loading proving key…', proving: 'generating ZK proof…', submitting: 'submitting to Stellar…' };
 
   async function anchor() {
     busy = true;
-    stage = 'anchoring';
     error = '';
+    stage = 'loading';
+    regulator = false;
+    opened = null;
+    liveRead = null;
+    tamper = null;
     try {
-      const r = await anchorOnChain();
-      txHash = r.txHash;
-      receipt = {
+      result = await anchorLive(amount, (s) => (stage = s));
+      live = true;
+      if (result.kind) walletKind = result.kind; // reflect a silent ephemeral fallback
+    } catch (e) {
+      // A-with-fallback: never hard-fail — show the real, previously-anchored on-chain proof.
+      console.warn('live path failed, using cached on-chain proof:', e?.message || e);
+      result = {
+        txHash: TX.submit,
         bracket: PUBLIC_SIGNALS.bracket,
         attCommitment: PUBLIC_SIGNALS.attCommitment,
-        settlementRef: PUBLIC_SIGNALS.settlementRef
+        settlementRef: PUBLIC_SIGNALS.settlementRef,
+        amount: TRANSFER.amount, // the cached tx actually anchored this amount, not the slider's current value
+        account: '(demo source)'
       };
-      stage = 'anchored';
-    } catch (e) {
-      error = 'Anchoring failed — please retry.';
-      stage = 'idle';
-    } finally {
-      busy = false;
+      live = false;
     }
-  }
-
-  async function readLive() {
-    busy = true;
-    error = '';
-    try {
-      liveRead = await readOnChainAttestation();
-    } catch (e) {
-      error = 'Live read failed.';
-    } finally {
-      busy = false;
-    }
+    stage = 'anchored';
+    anchoredAt = Date.now();
+    log = [{ txHash: result.txHash, bracket: result.bracket, live, at: Date.now() }, ...log].slice(0, 6);
+    busy = false;
   }
 
   async function toggleRegulator() {
-    if (regulator) {
-      regulator = false;
-      return;
-    }
+    if (regulator) return (regulator = false);
     busy = true;
     error = '';
     try {
-      if (!opened) opened = await openWithViewKey();
+      if (!opened) opened = await openWithViewKey(result);
       regulator = true;
     } catch (e) {
-      error = 'Could not open the attestation.';
+      error = 'Could not open attestation.';
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function doReadLive() {
+    busy = true;
+    try {
+      liveRead = await readAttestation(result.settlementRef);
+      if (!liveRead) liveRead = { missing: true };
+    } catch (e) {
+      liveRead = { error: true };
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function doTamper() {
+    busy = true;
+    tamper = { running: true };
+    try {
+      tamper = await tamperReject(amount);
+    } catch (e) {
+      tamper = { rejected: false, localError: String(e?.message || e).split('\n')[0] };
     } finally {
       busy = false;
     }
@@ -97,163 +99,239 @@
 
   function reset() {
     stage = 'idle';
-    receipt = null;
-    liveRead = null;
+    result = null;
     regulator = false;
     opened = null;
+    liveRead = null;
+    tamper = null;
     error = '';
-    txHash = '';
+    anchoredAt = 0;
   }
+
+  // flatten the IVMS record safely for the reveal
+  $: o = opened?.ivms?.originator?.originatorPersons?.[0]?.naturalPerson;
+  $: b = opened?.ivms?.beneficiary?.beneficiaryPersons?.[0]?.naturalPerson;
+  $: rev = opened
+    ? {
+        oName: [o?.name?.nameIdentifier?.[0]?.secondaryIdentifier, o?.name?.nameIdentifier?.[0]?.primaryIdentifier].filter(Boolean).join(' ') || '—',
+        oAddr: [o?.geographicAddress?.[0]?.addressLine?.[0], o?.geographicAddress?.[0]?.townName, o?.geographicAddress?.[0]?.country].filter(Boolean).join(', '),
+        oDob: o?.dateAndPlaceOfBirth?.dateOfBirth ?? '—',
+        oVasp: opened.ivms.originatingVASP,
+        bName: [b?.name?.nameIdentifier?.[0]?.secondaryIdentifier, b?.name?.nameIdentifier?.[0]?.primaryIdentifier].filter(Boolean).join(' ') || '—',
+        bAddr: [b?.geographicAddress?.[0]?.addressLine?.[0], b?.geographicAddress?.[0]?.townName, b?.geographicAddress?.[0]?.country].filter(Boolean).join(', '),
+        bVasp: opened.ivms.beneficiaryVASP,
+        amount: opened.ivms.transfer?.amount,
+        asset: opened.ivms.transfer?.asset,
+        commitmentMatch: opened.commitmentMatch
+      }
+    : null;
 </script>
+
+<div class="bar">
+  <span class="dot" /> TESTNET
+  <span class="sep">·</span>
+  <span class="mono">contract {short(VERITAS_CONTRACT, 6)}</span>
+  <a class="barlink" href={`${EXPLORER}/contract/${VERITAS_CONTRACT}`} target="_blank" rel="noreferrer">verify ↗</a>
+</div>
 
 <main>
   <header>
-    <h1 class="logo">⬡ Veritas</h1>
-    <p class="tag">Prove the Travel Rule was followed — without putting anyone's identity on-chain.</p>
+    <h1>Veritas</h1>
+    <p class="tag">Prove the Travel Rule was followed — without putting an identity on-chain. Every run is a real proof and a real transaction.</p>
   </header>
 
-  <!-- 1 · the transfer -->
-  <section>
-    <h2>1 · A cross-VASP stablecoin transfer</h2>
-    <div class="transfer">
-      <div class="party">
-        <span class="role">Originator VASP</span>
-        <b>{TRANSFER.originator}</b>
-        <span class="jur">{TRANSFER.originatorJurisdiction}</span>
-      </div>
-      <div class="arrow">
-        <span class="amt">{TRANSFER.amount} {TRANSFER.asset}</span>
-        <span class="hidden">🔒 amount hidden on-chain</span>
-        →
-      </div>
-      <div class="party">
-        <span class="role">Beneficiary VASP</span>
-        <b>{TRANSFER.beneficiary}</b>
-        <span class="jur">{TRANSFER.beneficiaryJurisdiction}</span>
-      </div>
+  <!-- input -->
+  <section class="compose">
+    <div class="parties">
+      <div><label>Originator VASP <span class="sim">SIMULATED</span></label><b>{TRANSFER.originator}</b><span>{TRANSFER.originatorJurisdiction}</span></div>
+      <div class="ar">→</div>
+      <div><label>Beneficiary VASP <span class="sim">SIMULATED</span></label><b>{TRANSFER.beneficiary}</b><span>{TRANSFER.beneficiaryJurisdiction}</span></div>
+    </div>
+    <div class="slider">
+      <label>Transfer amount (hidden on-chain — only the bracket is proven)</label>
+      <input type="range" min="100" max="10000" step="100" bind:value={amount} disabled={busy} />
+      <div class="amtrow"><span class="amt mono">{amount.toLocaleString()} USDC</span>
+        <span class="bracket" class:full={amount >= 1000}>{amount >= 1000 ? 'FULL IVMS101 (≥ $1,000)' : 'reduced (< $1,000)'}</span></div>
+    </div>
+    <div class="wallet">
+      <span>Sign with</span>
+      <button class="seg" class:on={walletKind === 'ephemeral'} on:click={() => pickWallet('ephemeral')} disabled={busy}>Ephemeral · auto-funded</button>
+      <button class="seg" class:on={walletKind === 'freighter'} on:click={() => pickWallet('freighter')} disabled={busy}>Freighter wallet</button>
     </div>
     {#if stage === 'idle'}
-      <button on:click={anchor} disabled={busy} aria-busy={busy}>Generate proof + anchor on Stellar →</button>
-    {:else if stage === 'anchoring'}
-      <button disabled aria-busy="true"><span class="spin" aria-hidden="true">◌</span> proving + verifying on-chain…</button>
+      <button class="primary" on:click={anchor} disabled={busy}>Generate ZK proof + anchor on Stellar</button>
+    {:else if stage !== 'anchored'}
+      <button class="primary" disabled aria-busy="true"><span class="spin">◜</span> {stageLabel[stage] ?? 'working…'}</button>
+    {:else}
+      <button class="ghost" on:click={reset} disabled={busy}>↺ run again</button>
     {/if}
-    {#if error}<p class="error" role="alert">{error}</p>{/if}
+    {#if error}<p class="err" role="alert">{error}</p>{/if}
   </section>
 
-  {#if stage === 'anchored'}
-    <!-- 2 · the public view -->
-    <section class="public" aria-live="polite">
-      <h2>2 · What everyone on the chain sees</h2>
-      <div class="verdict" role="status">✓ Travel-Rule compliant</div>
-      <div class="grid">
-        <div><span>Data bracket</span><b>{receipt.bracket === 1 ? 'FULL IVMS101 (≥ threshold)' : 'reduced'}</b></div>
-        <div><span>Commitment</span><b class="mono">{short(receipt.attCommitment, 8)}</b></div>
-        <div><span>Settlement</span><b class="mono">{short(receipt.settlementRef, 8)}</b></div>
+  {#if stage === 'anchored' && result}
+    <!-- the two ledgers -->
+    <section class="ledgers">
+      <!-- LEFT: public -->
+      <div class="pane public">
+        <div class="ph"><span>What the chain sees</span>{#if live}<span class="badge real">VERIFIED ON-CHAIN</span>{:else}<span class="badge cached">CACHED (live run unavailable)</span>{/if}</div>
+        <div class="verdict">✓ Travel-Rule compliant</div>
+        <dl>
+          <div><dt>Originator</dt><dd class="redact">████████████</dd></div>
+          <div><dt>Beneficiary</dt><dd class="redact">█████████</dd></div>
+          <div><dt>Amount</dt><dd class="redact">██████</dd></div>
+          <div><dt>Bracket</dt><dd>{result.bracket === 1 ? 'full IVMS101' : 'reduced'}</dd></div>
+          <div><dt>Commitment</dt><dd class="mono sm">{short(result.attCommitment, 8)}</dd></div>
+          <div><dt>Settlement</dt><dd class="mono sm">{short(result.settlementRef, 8)}</dd></div>
+        </dl>
+        <div class="tx">
+          <a href={`${EXPLORER}/tx/${result.txHash}`} target="_blank" rel="noreferrer" class="mono">{short(result.txHash, 8)} ↗</a>
+          {#if live}<span class="age" role="status">confirmed {ageSec}s ago</span>{/if}
+        </div>
+        <div class="acts">
+          <button class="ghost" on:click={doReadLive} disabled={busy}>read live from chain</button>
+          <button class="ghost danger" on:click={doTamper} disabled={busy}>try to forge it</button>
+        </div>
+        {#if liveRead}
+          <p class="readout mono">{liveRead.error ? 'read error' : liveRead.missing ? 'not found' : `chain → bracket=${liveRead.bracket}, submitter=${short(liveRead.submitter, 4)}, ledger=${liveRead.ledger}`}</p>
+        {/if}
+        {#if tamper}
+          <p class="readout" class:bad={tamper.rejected}>{tamper.running ? 'submitting a tampered proof…' : tamper.rejected ? `contract REJECTED on-chain: ${tamper.reason}` : tamper.localError ? `couldn't reach contract: ${tamper.localError}` : 'unexpectedly accepted'}</p>
+        {/if}
       </div>
-      <p class="callout">No names. No addresses. No amount. No IVMS101 data. Just a verified, non-repudiable fact — anchored to this settlement, that no party can forge or delete.</p>
-      <div class="links">
-        <a href={`${EXPLORER}/tx/${txHash}`} target="_blank" rel="noreferrer">↗ verification tx</a>
-        <a href={`${EXPLORER}/contract/${VERITAS_CONTRACT}`} target="_blank" rel="noreferrer">↗ contract</a>
-        <button class="ghost" on:click={readLive} disabled={busy} aria-busy={busy}>{busy ? '◌ reading…' : '↻ read live from chain'}</button>
-        <button class="ghost" on:click={reset} disabled={busy}>↺ run again</button>
-      </div>
-      {#if liveRead}
-        <p class="live" class:cached={!liveRead.live} role="status">
-          {liveRead.live ? '🟢 live from Soroban RPC' : '⚪ cached on-chain value (RPC unavailable)'}
-          — bracket={liveRead.bracket}, commitment={short(liveRead.attCommitment, 6)}, submitter={short(liveRead.submitter, 5)}
-        </p>
-      {/if}
 
-      <!-- 3 · the reveal -->
-      <div class="reg-toggle">
-        <button class="reg" on:click={toggleRegulator} disabled={busy} aria-busy={busy}>
-          {#if busy && !regulator}<span class="spin" aria-hidden="true">◌</span> opening…
-          {:else if regulator}🙈 hide regulator view
-          {:else}🕶️ put on the regulator's glasses{/if}
-        </button>
+      <!-- RIGHT: private -->
+      <div class="pane private" class:open={regulator}>
+        <div class="ph"><span>The full truth</span><span class="badge {regulator ? 'real' : 'lock'}">{regulator ? 'VIEW-KEY APPLIED' : 'SEALED'}</span></div>
+        {#if !regulator}
+          <div class="vault">
+            <div class="lock">⬡</div>
+            <p>Encrypted to the regulator's view key. The chain holds only a commitment — no identity, no amount.</p>
+            <button class="primary sm" on:click={toggleRegulator} disabled={busy}>{busy ? 'opening…' : 'Apply regulator view-key'}</button>
+          </div>
+        {:else if rev}
+          <div class="truth">
+            <div class="match">opened with the regulator view-key <span class="ok">✓</span></div>
+            {#if rev.commitmentMatch === true}
+              <div class="match">attCommitment recomputed from these fields — matches the value anchored on-chain <span class="ok">✓</span></div>
+            {:else if rev.commitmentMatch === false}
+              <div class="match">attCommitment recomputed from these fields — does <b>not</b> match the anchored value <span class="warn">✗</span></div>
+            {/if}
+            <div class="cols">
+              <div><h4>Originator</h4><b>{rev.oName}</b><span>{rev.oAddr}</span><span class="dim">DOB {rev.oDob}</span><span class="dim">{rev.oVasp?.name} · {rev.oVasp?.lei}</span></div>
+              <div><h4>Beneficiary</h4><b>{rev.bName}</b><span>{rev.bAddr}</span><span class="dim">{rev.bVasp?.name} · {rev.bVasp?.lei}</span></div>
+            </div>
+            <div class="amt2">Amount <b>{rev.amount} {rev.asset}</b></div>
+            <button class="ghost sm" on:click={toggleRegulator}>seal again</button>
+            <p class="note">The public ledger (left) stays redacted forever. Only the key-holder reconstructs the truth — and it's the same cryptographic object.</p>
+          </div>
+        {/if}
       </div>
     </section>
-  {/if}
 
-  {#if regulator && view}
-    <section class="reveal" aria-live="polite">
-      <h2>3 · What only a regulator (view key) can open</h2>
-      <p class="match" role="status">🔑 Reconstructed and verified against the on-chain commitment
-        <span class="ok">{view.matches ? '✓ matches' : '—'}</span></p>
-      <div class="ivms">
-        <div class="col">
-          <h3>Originator</h3>
-          <b>{view.origName}</b>
-          <span>{view.origAddr}</span>
-          <span class="dim">DOB {view.origDob}</span>
-          <span class="dim">{view.origVasp}</span>
-        </div>
-        <div class="col">
-          <h3>Beneficiary</h3>
-          <b>{view.benName}</b>
-          <span>{view.benAddr}</span>
-          <span class="dim">{view.benVasp}</span>
-        </div>
-      </div>
-      <div class="amount-reveal">Amount: <b>{view.amount} {view.asset}</b>
-        <span class="dim">IVMS101 {view.version}</span></div>
-      <p class="callout small">Same on-chain ✓ — but the holder of the designated view key reconstructs the full
-        IVMS101 attestation bound to <em>this exact settlement</em>, and nothing else. No one else can.</p>
-    </section>
+    {#if log.length > 1}
+      <section class="logsec">
+        <h3>Compliance log <span class="dim">— anchored this session</span></h3>
+        {#each log as e}
+          <a class="logrow mono" href={`${EXPLORER}/tx/${e.txHash}`} target="_blank" rel="noreferrer">
+            <span class="ok">✓</span> {short(e.txHash, 8)} <span class="dim">bracket {e.bracket}{e.live ? '' : ' · cached'}</span> ↗
+          </a>
+        {/each}
+      </section>
+    {/if}
   {/if}
 
   <footer>
-    Real BLS12-381 Groth16 proof, verified inside a Soroban contract on Stellar testnet · proofs
-    pre-generated · VASPs &amp; IVMS101 data simulated (see SECURITY.md).
+    Real BLS12-381 Groth16 proof, generated in-browser and verified inside a Soroban contract on Stellar testnet.
+    Proof + transaction are live; the VASPs and IVMS101 data are simulated (see SECURITY.md).
   </footer>
 </main>
 
 <style>
-  :global(body){margin:0;background:#0a0c12;color:#e8ebf2;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif}
-  main{max-width:780px;margin:0 auto;padding:2.5rem 1.25rem 4rem}
-  header{margin-bottom:1.5rem}
-  .logo{font-size:2rem;font-weight:800;letter-spacing:-.02em;color:#a78bfa;margin:0}
-  .tag{color:#8b95a7;margin:.35rem 0 0}
-  section{background:#11151f;border:1px solid #1e2738;border-radius:16px;padding:1.3rem 1.5rem;margin-top:1.2rem}
-  h2{font-size:.78rem;color:#8b95a7;text-transform:uppercase;letter-spacing:.1em;margin:0 0 1rem}
-  .transfer{display:flex;align-items:center;justify-content:space-between;gap:1rem}
-  .party{display:flex;flex-direction:column;gap:.15rem;flex:1}
-  .role{font-size:.7rem;color:#7c8699;text-transform:uppercase;letter-spacing:.06em}
-  .party b{font-size:1.02rem}
-  .jur{font-size:.75rem;color:#8b95a7}
-  .arrow{display:flex;flex-direction:column;align-items:center;color:#a78bfa;font-size:1.4rem;min-width:140px}
-  .amt{font-size:.95rem;font-weight:700;color:#e8ebf2}
-  .hidden{font-size:.68rem;color:#f5a623}
-  button{margin-top:1.2rem;width:100%;background:#7c5cff;color:#fff;border:0;border-radius:11px;padding:.8rem 1.1rem;font-weight:600;font-size:.95rem;cursor:pointer;transition:filter .15s}
+  :global(body){margin:0;background:#0b0d12;color:#e9ecf2;font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;font-feature-settings:'tnum'}
+  .mono{font-family:ui-monospace,'SF Mono',Menlo,monospace}
+  .bar{display:flex;align-items:center;gap:.5rem;padding:.5rem 1rem;background:#0e1117;border-bottom:1px solid #1b2230;font-size:.74rem;color:#8a93a6}
+  .dot{width:7px;height:7px;border-radius:50%;background:#3ddc97;box-shadow:0 0 8px #3ddc97}
+  .bar .sep{color:#39414f}
+  .barlink{margin-left:auto;color:#6ea8fe;text-decoration:none}
+  main{max-width:1080px;margin:0 auto;padding:2rem 1.25rem 4rem}
+  header h1{font-size:1.9rem;letter-spacing:-.02em;margin:0;font-weight:800}
+  .tag{color:#8a93a6;margin:.3rem 0 0;max-width:60ch}
+  section{margin-top:1.25rem}
+  .compose{background:#11151e;border:1px solid #1d2533;border-radius:14px;padding:1.2rem 1.4rem}
+  .parties{display:flex;align-items:center;gap:1rem}
+  .parties > div{flex:1;display:flex;flex-direction:column;gap:.12rem}
+  .parties label{font-size:.66rem;color:#6c7585;text-transform:uppercase;letter-spacing:.05em}
+  .parties b{font-size:1rem}
+  .parties span{font-size:.78rem;color:#8a93a6}
+  .ar{flex:0;color:#6ea8fe;font-size:1.3rem}
+  .sim{background:#241a08;color:#d8a657;border:1px dashed #6b521f;border-radius:4px;padding:0 .3rem;font-size:.6rem;letter-spacing:.04em}
+  .slider{margin-top:1.1rem}
+  .slider label{font-size:.72rem;color:#8a93a6}
+  .slider input{width:100%;margin:.5rem 0 .3rem;accent-color:#7c5cff}
+  .amtrow{display:flex;justify-content:space-between;align-items:baseline}
+  .amt{font-size:1.15rem;font-weight:700}
+  .bracket{font-size:.74rem;color:#8a93a6}
+  .bracket.full{color:#3ddc97}
+  .wallet{display:flex;align-items:center;gap:.5rem;margin-top:1rem;font-size:.74rem;color:#8a93a6}
+  .seg{background:#161c28;color:#8a93a6;border:1px solid #232c3c;padding:.3rem .7rem;font-size:.74rem;font-weight:500}
+  .seg.on{background:#1c2740;color:#cdd6e4;border-color:#3a4a6e}
+  button{cursor:pointer;border:0;border-radius:10px;font-weight:600;transition:filter .15s}
+  button:disabled{opacity:.55;cursor:default}
   button:hover:not(:disabled){filter:brightness(1.1)}
-  button:disabled{opacity:.6;cursor:default}
+  .primary{width:100%;margin-top:1.1rem;background:#7c5cff;color:#fff;padding:.78rem;font-size:.95rem}
+  .primary.sm{width:auto;margin:.3rem 0 0;padding:.5rem .9rem;font-size:.84rem}
+  .ghost{background:#1a2230;color:#cfd6e4;padding:.45rem .85rem;font-size:.8rem}
+  .ghost.sm{padding:.35rem .7rem}
+  .ghost.danger{color:#f0a59b}
   .spin{display:inline-block;animation:spin 1s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
-  .error{color:#fca5a5;font-size:.85rem;margin-top:.7rem}
-  .verdict{font-size:1.5rem;font-weight:800;color:#34d399;margin-bottom:1rem}
-  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.8rem}
-  .grid div{display:flex;flex-direction:column;gap:.2rem;background:#0c1019;border-radius:10px;padding:.7rem .8rem}
-  .grid span{font-size:.66rem;color:#7c8699;text-transform:uppercase;letter-spacing:.05em}
-  .grid b{font-size:.9rem}
-  .mono{font-family:ui-monospace,monospace}
-  .callout{background:#0c1019;border-left:3px solid #34d399;border-radius:8px;padding:.7rem .9rem;color:#b9c2d0;font-size:.9rem;margin:1rem 0 .6rem}
-  .callout.small{font-size:.82rem;border-left-color:#a78bfa}
-  .links{display:flex;gap:1rem;align-items:center;flex-wrap:wrap;margin-top:.4rem}
-  a{color:#60a5fa;text-decoration:none;font-size:.85rem}
-  a:hover{text-decoration:underline}
-  button.ghost{width:auto;margin:0;background:#1b2333;color:#cdd5e3;padding:.4rem .8rem;font-size:.8rem}
-  button.reg{background:#a78bfa;margin-top:1.2rem}
-  .live{font-size:.82rem;color:#34d399;margin-top:.6rem;font-family:ui-monospace,monospace}
-  .live.cached{color:#9aa6b8}
-  .reveal{border-color:#3b2d63;box-shadow:0 0 0 1px #2a2050}
-  .match{color:#c4b5fd;font-size:.9rem}
-  .ok{color:#34d399;font-weight:700}
-  .ivms{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
-  .col{display:flex;flex-direction:column;gap:.25rem;background:#0c1019;border-radius:10px;padding:.9rem 1rem}
-  .col h3{margin:0 0 .3rem;font-size:.7rem;color:#a78bfa;text-transform:uppercase;letter-spacing:.06em}
-  .col b{font-size:1.05rem}
-  .col span{font-size:.83rem;color:#c2cad7}
-  .dim{color:#9aa6b8 !important;font-size:.78rem !important}
-  .amount-reveal{margin-top:.9rem;font-size:1rem;display:flex;gap:.8rem;align-items:baseline}
-  footer{margin-top:2rem;text-align:center;color:#6b7488;font-size:.75rem;line-height:1.5}
+  .err{color:#f0a59b;font-size:.82rem;margin:.6rem 0 0}
+  .ledgers{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+  .pane{border-radius:14px;padding:1.1rem 1.3rem;min-height:300px}
+  .ph{display:flex;justify-content:space-between;align-items:center;font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;margin-bottom:.9rem}
+  .badge{font-size:.6rem;padding:.12rem .4rem;border-radius:4px;letter-spacing:.04em}
+  .badge.real{background:#06321f;color:#3ddc97;border:1px solid #14512f}
+  .badge.cached{background:#2a2207;color:#d8a657;border:1px solid #5a4818}
+  .badge.lock{background:#1b1f2a;color:#8a93a6;border:1px solid #2a3242}
+  /* LEFT public = light institutional document */
+  .public{background:#f4f1ea;color:#1c2128;border:1px solid #d9d2c4}
+  .public .ph{color:#7a7464}
+  .verdict{font-size:1.3rem;font-weight:800;color:#1a7f4b;margin-bottom:.8rem}
+  .public dl{margin:0;display:grid;gap:.4rem}
+  .public dl > div{display:flex;justify-content:space-between;border-bottom:1px solid #e4ddcf;padding-bottom:.35rem}
+  .public dt{font-size:.74rem;color:#6b6555;text-transform:uppercase;letter-spacing:.04em}
+  .public dd{margin:0;font-size:.86rem;font-weight:600}
+  .public dd.sm{font-size:.76rem;font-weight:500}
+  .redact{background:#1c2128;color:#1c2128;border-radius:3px;letter-spacing:-1px;user-select:none}
+  .tx{margin-top:.9rem;display:flex;align-items:center;gap:.7rem;flex-wrap:wrap}
+  .public .tx a{color:#2d6cdf;text-decoration:none;font-size:.8rem}
+  .age{font-size:.72rem;color:#1a7f4b;font-variant-numeric:tabular-nums}
+  .acts{display:flex;gap:.5rem;margin-top:.8rem}
+  .public .ghost{background:#e7e0d2;color:#3a3a3a}
+  .public .ghost.danger{color:#b4452f}
+  .readout{margin:.7rem 0 0;font-size:.76rem;color:#5a5546}
+  .readout.bad{color:#b4452f;font-weight:600}
+  /* RIGHT private = dark vault */
+  .private{background:#0f1320;border:1px solid #1e2740;transition:box-shadow .4s}
+  .private.open{box-shadow:0 0 0 1px #3b2d63,0 0 40px -12px #7c5cff}
+  .vault{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:.7rem;height:240px;color:#8a93a6}
+  .vault .lock{font-size:2.4rem;color:#4b3f7a}
+  .vault p{font-size:.82rem;max-width:34ch;margin:0}
+  .truth{animation:fade .4s ease}
+  @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1}}
+  .match{font-size:.78rem;color:#c4b5fd;margin-bottom:.8rem}
+  .ok{color:#3ddc97}
+  .warn{color:#f0a59b}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:.8rem}
+  .cols > div{display:flex;flex-direction:column;gap:.2rem;background:#0b0e18;border-radius:9px;padding:.7rem .8rem}
+  .cols h4{margin:0 0 .25rem;font-size:.64rem;color:#a78bfa;text-transform:uppercase;letter-spacing:.06em}
+  .cols b{font-size:1rem}
+  .cols span{font-size:.78rem;color:#c2cad7}
+  .dim{color:#7c8699}
+  .amt2{margin-top:.8rem;font-size:.95rem}
+  .note{font-size:.74rem;color:#8a93a6;margin:.8rem 0 0;max-width:52ch}
+  .logsec h3{font-size:.78rem;color:#8a93a6;font-weight:600}
+  .logrow{display:block;color:#aeb7c8;text-decoration:none;font-size:.78rem;padding:.35rem 0;border-bottom:1px solid #161c28}
+  footer{margin-top:2rem;text-align:center;color:#5c6577;font-size:.74rem;line-height:1.6;max-width:70ch;margin-left:auto;margin-right:auto}
+  @media(max-width:760px){.ledgers{grid-template-columns:1fr}.cols{grid-template-columns:1fr}}
 </style>
