@@ -1,0 +1,116 @@
+# Veritas — Build Plan
+
+A phased plan from empty repo to a finished, judge-verifiable project. Each phase has a hard
+**Definition of Done (DoD)** — we don't move on until it's met.
+
+Status: ⬜ not started · 🔄 in progress · ✅ done
+
+---
+
+## Phase 0 — Foundation & Day-One Gate ✅ DONE
+**Goal:** prove the ZK → Soroban path works end-to-end *before* building anything real. The single most
+important de-risking step — it kills the "shipped something impressive that never verified on-chain"
+failure mode.
+
+- [x] Install toolchain — circom 2.2.3, snarkjs 0.7.6, stellar-cli 27.0.0, rust wasm target
+- [x] Build + test the official `soroban-examples` groth16_verifier (BLS12-381) — `cargo test` passes
+- [x] Compile a trivial circuit (`a*b=c`) with `--prime bls12381`, trusted setup, generate a proof — verified off-chain (`snarkJS: OK!`)
+- [x] Deploy the verifier to Stellar **testnet** and verify the proof **on-chain** — returned `true`
+
+**✅ DoD MET — green on-chain verification on testnet:**
+- Verifier contract: `CBOLT6FYCO4JKADIN2W66ZZJ4UDC3IW4SMG2MHYFZOIYF273LOI2PXOO`
+- `verify_proof` tx (returned `true`): [`51c26280…c21eb8da`](https://stellar.expert/explorer/testnet/tx/51c26280818a3eca81293c4c281d85740d363aafb0cb183c1d2a6647c21eb8da)
+- On-chain pairing-check cost: ~41M / 100M CPU (comfortable headroom).
+- The most-at-risk part of the whole project (Circom→Groth16→BLS12-381→Soroban) is proven working.
+
+---
+
+## Phase 1 — Core ZK circuit (the load-bearing proof) ✅ DONE
+**Goal:** the real Veritas compliance circuit (`circuits/veritas.circom`).
+
+- [x] Merkle-membership for both VASPs (circuit-derived `registryRoot`, `rootA===rootB`)
+- [x] **Threshold / bracket logic over the HIDDEN amount** — the genuinely-ZK core
+- [x] IVMS101 data commitment + receiving-VASP acknowledgement binding
+- [x] Regulator-view-key attestation commitment (public output)
+- [x] Compile `--prime bls12381`, trusted setup, export verification key (8530 non-linear constraints, nPublic=6)
+- [x] Poseidon-free fixture generator + reusable snarkjs-JSON→Soroban-bytes encoder (`tools/encode`)
+- [x] Incorporate Code Reviewer + Security Engineer findings (range-constrain amount+threshold, enforce leafA≠leafB, bind amount/bracket/both leaves into the commitment, drop the constant `compliant` output)
+
+**✅ DoD MET — the hardened Veritas proof verifies on testnet:**
+- `verify_proof` tx (returned `true`): [`11f2f89b…b657ef5b`](https://stellar.expert/explorer/testnet/tx/11f2f89b8ff38a01b538b7a24d66cc691fe846038fd3db34612de232b657ef5b)
+- Public signals: `bracket=1, registryRoot, attCommitment, settlementRef, threshold=1000` (nPublic=5).
+- 8750 non-linear constraints. Reviewed by Code-Review + Security-Engineer agents.
+
+**Deferred (honestly documented in [SECURITY.md](./SECURITY.md)):** in-circuit B-signature for the
+acknowledgement, real verifiable encryption for regulator opening, and `settlementRef`→real-payment
+binding. Contract-level findings (public-signal ordering, pin `threshold`, `require_auth`) are fixed in
+Phase 2.
+
+---
+
+## Phase 2 — Soroban contract (on-chain compliance anchor) ✅ DONE
+**Goal:** the contract that anchors compliance to settlement (`contracts/veritas`).
+
+- [x] Registry root + VK pinned atomically at deploy (`__constructor`, front-run-proof)
+- [x] `submit_compliance`: real BLS12-381 Groth16 verify → bind registry + settlement + threshold → store attestation → emit `✓`
+- [x] Hardened per Code-Review + Security-Engineer audits (fail-fast ordering, canonicity check, TTL extension, submitter provenance)
+- [x] 8 unit tests (all negative branches) + on-chain integration + replay rejection
+- [ ] (deferred, documented in SECURITY.md) in-circuit submitter/VASP identity binding; settlementRef→real-payment binding
+
+**✅ DoD MET — end-to-end on testnet:**
+- Veritas contract: `CB6DCNEGNXP7WQB3XVDABZ2TUNM5DSK4VYXLCE4OZWGXMGSZRGYBOFWV`
+- `submit_compliance` (real proof): [`20c48e42…`](https://stellar.expert/explorer/testnet/tx/20c48e426a3bf44b7a719226f06db8f919da9b3028fc2f6ce20355554ddedc28)
+- `get_attestation` → `{bracket:1, att_commitment, settlement_ref, submitter}` (no PII); replay rejected with `AlreadyAnchored`.
+
+---
+
+## Phase 3 — Off-chain plumbing ✅ DONE
+**Goal:** everything around the proof.
+
+- [x] Proving pipeline (circom → snarkjs → bls12381) + Poseidon-free fixture generator (`circuits/gen-veritas-input.mjs`) + reusable snarkjs→Soroban encoder (`tools/encode`)
+- [x] IVMS101 record + real on-chain references for the demo (`web/src/lib/fixtures.js`)
+- [x] Real proof artifacts pre-generated (proving on-stage avoided per SECURITY.md)
+
+**DoD MET:** the pipeline produces a real proof that verifies on-chain; the browser consumes the
+pre-generated proof + the real IVMS101 attestation. (Live in-browser proving deferred for reliability.)
+
+---
+
+## Phase 4 — Frontend & the reveal moment ✅ DONE
+**Goal:** the demo surface and the unforgettable beat (`web/`).
+
+- [x] Svelte UI: transfer → anchor on Stellar → public sees only `✓` (no PII)
+- [x] **The reveal:** "put on the regulator's glasses" (view key) → the full IVMS101 attestation unfolds
+- [x] Live on-chain read of `get_attestation` (Soroban RPC) + stellar.expert deep-links
+- [x] Hardened per Code-Review + Security-Engineer (render-safe reveal, try/finally + error state, honest live-vs-cached badge, a11y, pinned SDK 12.3.0, no secrets/XSS)
+- [x] `npm run build` passes (SvelteKit + Stellar SDK, client-rendered)
+
+**DoD MET:** the public-✓ → regulator-reveal contrast renders; data wired to the real deployed contract.
+
+---
+
+## Phase 5 — Integration, honest README, polish ✅ DONE
+- [x] End-to-end on testnet: circuit proof → contract verify+anchor → frontend reads the real attestation
+- [x] Submission-ready README with a "Verify it yourself on testnet" table of clickable contract + tx links
+- [x] Honest SECURITY.md (real vs mocked, deferred items) reflecting all audit findings
+- [x] Frontend polish (render-safe reveal, a11y, error/loading states, reset)
+
+**DoD MET:** a stranger can clone the repo, run it, and independently verify the on-chain artifacts.
+
+---
+
+## Phase 6 — Submission 🔄 repo ready
+- [x] Full source committed with a clear README (required)
+- [ ] Push to a public GitHub remote (your account) + submit on DoraHacks
+- [ ] 2–3 min demo video (owned by Arya)
+
+**DoD:** submitted on DoraHacks.
+
+---
+
+### The three win-conditions to hold throughout
+1. **Keep the ZK load-bearing** — center it on the hidden-amount/bracket logic + verifiable
+   computation over private IVMS data, so it's never "ZK wrapping signatures."
+2. **Ship it complete** — a 70%-done compliance protocol is invisible to judges.
+3. **The reveal moment is the demo** — public `✓` → regulator view-key → full attestation. Build it as
+   a real on-screen beat, not a footnote.

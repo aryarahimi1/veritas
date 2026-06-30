@@ -1,0 +1,15 @@
+{
+  "name": "veritas-circuits",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Circom circuits for the Veritas Travel Rule compliance proof (Groth16 / BLS12-381)",
+  "license": "MIT",
+  "scripts": {
+    "build": "bash ../scripts/build-circuit.sh",
+    "fixtures": "node ../scripts/gen-fixtures.mjs"
+  },
+  "dependencies": {
+    "circomlib": "^2.0.5",
+    "circomlibjs": "^0.1.7"
+  }
+}

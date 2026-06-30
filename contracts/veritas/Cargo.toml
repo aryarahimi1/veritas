@@ -1,0 +1,16 @@
+[package]
+name = "veritas-contract"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Veritas — on-chain Travel Rule compliance anchor (Soroban)"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = "22"
+
+[dev-dependencies]
+soroban-sdk = { version = "22", features = ["testutils"] }
