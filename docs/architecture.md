@@ -57,9 +57,13 @@ that moved the money**, attesting four things at once without revealing any pers
 ## What's real vs. simulated
 
 - **Real:** IVMS101 format, the Soroban settlement tx (testnet USDC), the Groth16 proof, its on-chain
-  verification, the settlement binding, the view-key reveal. All independently checkable.
-- **Simulated:** the participating VASPs, the licensing registry, and the customer PII (synthetic). The
-  mocked part is only the *participants*, never the cryptography or the on-chain artifact.
+  verification, the settlement binding. All independently checkable.
+- **Simulated:** the participating VASPs, the licensing registry, the customer PII (synthetic), and the
+  regulator view-key reveal in the demo UI — it renders a client-side simulation of what a key-holder
+  would reconstruct, not an access-controlled decryption; the secret and the IVMS101 fixture ship in the
+  public demo bundle regardless of whether "reveal" is clicked. See [SECURITY.md](../SECURITY.md). The
+  mocked part is only the *participants* and this UI convenience, never the cryptography or the on-chain
+  artifact.
 
 ## Why ZK and not just signatures
 

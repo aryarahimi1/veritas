@@ -2,16 +2,18 @@
 
 **A privacy-preserving Travel Rule compliance layer for Stellar — proven on-chain.**
 
+> **$4.3B.** What Binance paid the U.S. DOJ, FinCEN, CFTC, and OFAC in November 2023 — FinCEN's $3.4B
+> share alone the largest Bank Secrecy Act enforcement action in history — with AML-program,
+> registration, and SAR-filing failures at the core. It's exactly the cross-border customer-data
+> breakdown FATF's Travel Rule exists to prevent, and today there is still **no shared, verifiable proof
+> that a Travel Rule check ever happened** — every VASP just trusts its own private database, which a
+> regulator must take on faith and which can be quietly edited or "lost."
+
 When a licensed exchange (a VASP) sends a stablecoin transfer for a customer to another exchange, FATF
-Recommendation 16 (the "Travel Rule") forces the sender to hand over the customer's identifying
-details. Today that data moves through off-chain networks (Notabene, Sygna, TRP) in the
-[IVMS101](https://www.intervasp.org/) format — but there is **no shared, verifiable proof that the
-exchange actually happened.** Each VASP just trusts its own private database, which a regulator must
-take on faith and which can be quietly edited or "lost" — and the stakes are concrete: in November 2023
-Binance reached a $4.3B settlement with the U.S. DOJ, FinCEN, CFTC, and OFAC (FinCEN's $3.4B share alone
-the largest Bank Secrecy Act enforcement action in U.S. history), with AML-program, registration, and
-SAR-filing failures cited among the core violations — exactly the kind of cross-border customer-data
-breakdown the Travel Rule exists to prevent.
+Recommendation 16 (the "Travel Rule") forces the sender to hand over the customer's identifying details.
+Today that data moves through off-chain networks (Notabene, Sygna, TRP) in the
+[IVMS101](https://www.intervasp.org/) format — but nothing shared and verifiable proves the exchange
+actually happened.
 
 Veritas adds the missing piece: a **single zero-knowledge proof, verified inside a Soroban smart
 contract and anchored to a settlement**, that attests — *without revealing any personal data* — that
@@ -48,17 +50,9 @@ trying to move privately.
 
 ## What's real vs. simulated (honest disclosure)
 
-- **Real:** the IVMS101 format, the Groth16/BLS12-381 circuit, the proof, its **on-chain verification**,
-  the registry/threshold/settlement binding, the regulator-openable commitment, and the deployed
-  contract — all independently checkable on [stellar.expert](https://stellar.expert).
-- **Simulated for the demo:** the participating VASPs, the licensing registry, and the customer PII
-  (synthetic IVMS101). You can't onboard a real licensed exchange for a hackathon — but the mocked part
-  is only the *participants*, never the cryptography or the on-chain artifact.
-- Proofs are generated **live, in-browser** (Groth16/BLS12-381 via snarkjs) and submitted as a **fresh
-  transaction on every run** — not pre-generated. If that live call fails, the demo falls back to a
-  cached, previously-anchored proof rather than hard-failing. See **[SECURITY.md](./SECURITY.md)** for
-  the full threat model and the items deferred to a production build (in-circuit counterparty signature,
-  verifiable encryption for the regulator, settlement↔payment binding).
+Real: the circuit, the proof, its on-chain verification, and every artifact linked above. Simulated: the
+participating VASPs and the customer PII (synthetic) — you can't onboard a real licensed exchange for a
+hackathon. Full breakdown, including what's deferred to a production build, in **[SECURITY.md](./SECURITY.md)**.
 
 ## Architecture
 
@@ -91,7 +85,7 @@ acknowledgement, settlement, regulator key, amount, bracket, both leaves).
 | Path | What it is |
 |---|---|
 | `circuits/` | Circom circuit + Poseidon-free fixture generator |
-| `contracts/veritas/` | Rust Soroban contract — the on-chain compliance anchor (8 unit tests) |
+| `contracts/veritas/` | Rust Soroban contract — the on-chain compliance anchor (10 unit tests) |
 | `tools/encode/` | snarkjs-JSON → Soroban-bytes encoder (arkworks serialization) |
 | `web/` | SvelteKit frontend — the public-✓ → regulator-reveal demo |
 | `docs/`, `SECURITY.md`, `PLAN.md` | architecture, threat model, phased build log |

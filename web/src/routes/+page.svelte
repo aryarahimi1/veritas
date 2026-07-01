@@ -143,13 +143,13 @@
   <!-- input -->
   <section class="compose">
     <div class="parties">
-      <div><label>Originator VASP <span class="sim">SIMULATED</span></label><b>{TRANSFER.originator}</b><span>{TRANSFER.originatorJurisdiction}</span></div>
+      <div><label for="originator">Originator VASP <span class="sim">SIMULATED</span></label><b id="originator">{TRANSFER.originator}</b><span>{TRANSFER.originatorJurisdiction}</span></div>
       <div class="ar">→</div>
-      <div><label>Beneficiary VASP <span class="sim">SIMULATED</span></label><b>{TRANSFER.beneficiary}</b><span>{TRANSFER.beneficiaryJurisdiction}</span></div>
+      <div><label for="beneficiary">Beneficiary VASP <span class="sim">SIMULATED</span></label><b id="beneficiary">{TRANSFER.beneficiary}</b><span>{TRANSFER.beneficiaryJurisdiction}</span></div>
     </div>
     <div class="slider">
-      <label>Transfer amount (hidden on-chain — only the bracket is proven)</label>
-      <input type="range" min="100" max="10000" step="100" bind:value={amount} disabled={busy} />
+      <label for="amount">Transfer amount (hidden on-chain — only the bracket is proven)</label>
+      <input id="amount" type="range" min="100" max="10000" step="100" bind:value={amount} disabled={busy} />
       <div class="amtrow"><span class="amt mono">{amount.toLocaleString()} USDC</span>
         <span class="bracket" class:full={amount >= 1000}>{amount >= 1000 ? 'FULL IVMS101 (≥ $1,000)' : 'reduced (< $1,000)'}</span></div>
     </div>
@@ -205,7 +205,7 @@
         {#if !regulator}
           <div class="vault">
             <div class="lock">⬡</div>
-            <p>Encrypted to the regulator's view key. The chain holds only a commitment — no identity, no amount.</p>
+            <p>Simulates what a regulator holding the view key would see. The chain itself holds only a commitment — no identity, no amount.</p>
             <button class="primary sm" on:click={toggleRegulator} disabled={busy}>{busy ? 'opening…' : 'Apply regulator view-key'}</button>
           </div>
         {:else if rev}
@@ -222,7 +222,7 @@
             </div>
             <div class="amt2">Amount <b>{rev.amount} {rev.asset}</b></div>
             <button class="ghost sm" on:click={toggleRegulator}>seal again</button>
-            <p class="note">The public ledger (left) stays redacted forever. Only the key-holder reconstructs the truth — and it's the same cryptographic object.</p>
+            <p class="note">The public ledger (left) stays redacted forever — the chain itself never stores this data, only its commitment. This panel is a client-side simulation of the reconstruction a real key-holder would do (see SECURITY.md: this demo build, unlike the on-chain commitment, does not gate the secret behind real access control).</p>
           </div>
         {/if}
       </div>

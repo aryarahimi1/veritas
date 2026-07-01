@@ -56,16 +56,39 @@ Audited by Code-Review + Security-Engineer passes; the following are implemented
 - The submitting address is **recorded** in the attestation (provenance). The VK/registry are
   intentionally immutable post-deploy — no admin backdoor to forge proofs.
 - Real BLS12-381 Groth16 pairing check (not a stub); the BLS host functions validate point membership.
-- 8 unit tests cover every negative branch (malformed/canonicity/registry/settlement/threshold/auth).
+- 10 unit tests cover every negative branch (malformed/canonicity/registry/settlement/threshold/auth) plus
+  real-proof accept/reject.
 
 **Still deferred (HIGH-2, honest):** `require_auth(submitter)` proves *a* signer, not the originating
 VASP's identity — the submitter is not yet bound in-circuit, so a holder of a valid proof could anchor
 it under their own address. Binding the submitter as a public signal (with knowledge-of-leaf-secret) is
 the production fix, tracked alongside the in-circuit counterparty signature.
 
+## Phase 7 / web layer — closing security pass
+
+The Phase 7 live-in-browser-proving code (`web/src/lib/*`) was given a dedicated Security-Engineer pass
+after shipping. Two things not covered by the circuit/contract sections above:
+
+- **The regulator view-key reveal is a client-side UI simulation, not a real access-control boundary.**
+  Every secret needed to reconstruct the attestation (`ackSecret`, `regulatorKey`, `salt`, both VASP
+  leaves, `ivmsHash`) plus the full synthetic IVMS101 payload (names, addresses, DOB) ships in the public
+  demo's client JS bundle regardless of whether the "Apply regulator view-key" button is ever clicked —
+  every visitor already has everything "the regulator" has. This is separate from the already-documented
+  fact that `attCommitment` is a commitment-open rather than real decryption: this is about the *demo
+  build* additionally shipping the plaintext secret and payload to every browser. *Production:* gate
+  those values behind a real server-side check (or real verifiable encryption per the item above) so
+  "SEALED" is an actual state, not a component-state toggle.
+- **The Groth16 trusted setup was a single local contribution** (one `powersoftau contribute`, no
+  multi-party ceremony, no public beacon). Whoever ran it transiently held the toxic waste for this
+  circuit/verifying key; unless verifiably destroyed, that party could in principle forge a proof
+  satisfying the on-chain pairing check for arbitrary public inputs. *Production:* a real multi-party
+  ceremony (or a transparent/updatable-SRS proof system) is required before this could anchor real
+  compliance decisions.
+
 ## Reviews
 
 Phase 1 was audited by a Code-Review pass (found the unranged-`amount` under-constraint) and a
 Security-Engineering threat model (found the unbound-`amount`, self-pairing, signal-ordering, and
-regulator-modelling issues). The cheap, high-value fixes were applied; the heavyweight items above are
-documented rather than faked.
+regulator-modelling issues). Phase 7 was audited by a follow-up Security-Engineer pass (found the two
+items directly above). The cheap, high-value fixes were applied; the heavyweight items are documented
+rather than faked.

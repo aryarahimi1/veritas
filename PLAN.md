@@ -54,7 +54,7 @@ Phase 2.
 - [x] Registry root + VK pinned atomically at deploy (`__constructor`, front-run-proof)
 - [x] `submit_compliance`: real BLS12-381 Groth16 verify → bind registry + settlement + threshold → store attestation → emit `✓`
 - [x] Hardened per Code-Review + Security-Engineer audits (fail-fast ordering, canonicity check, TTL extension, submitter provenance)
-- [x] 8 unit tests (all negative branches) + on-chain integration + replay rejection
+- [x] 10 unit tests (all negative branches + real-proof accept/reject) + on-chain integration + replay rejection
 - [ ] (deferred, documented in SECURITY.md) in-circuit submitter/VASP identity binding; settlementRef→real-payment binding
 
 **✅ DoD MET — end-to-end on testnet:**
@@ -100,12 +100,13 @@ pre-generated proof + the real IVMS101 attestation. (Live in-browser proving def
 
 ---
 
-## Phase 6 — Submission 🔄 repo ready
+## Phase 6 — Submission 🔄 superseded by Phases 9–12 below
 - [x] Full source committed with a clear README (required)
-- [ ] Push to a public GitHub remote (your account) + submit on DoraHacks
-- [ ] 2–3 min demo video (owned by Arya)
+- [ ] Push to a public GitHub remote (your account) + submit on DoraHacks — **moved to Phase 11**
+- [ ] 2–3 min demo video (owned by Arya) — **moved to Phase 12**
 
-**DoD:** submitted on DoraHacks.
+**DoD:** submitted on DoraHacks. (Kept here as the historical record; the live checklist for what's left
+is Phases 9–12.)
 
 ---
 
@@ -119,9 +120,86 @@ Built to kill the "feels like mock data" critique. Each run now:
   network, funding, wallet, or otherwise (A-with-fallback),
 - redesigned as **"Two Ledgers"** — a light public ledger (redacted) vs a dark regulator vault that opens with the view key.
 
-De-risked by a JS↔Rust encoder **byte-match** + a **Node end-to-end test** (real fresh tx), and audited by
-Code-Review + Security-Engineer passes (no Critical/High/Medium). Lean per ponytail (generated bindings over
-hand-rolled ScVals, CSS over animation libs, one byte-match check). Needed SDK bump to 16.0.1 (Protocol 23).
+De-risked by a JS↔Rust encoder **byte-match** + a **Node end-to-end test** (real fresh tx). Lean per
+ponytail (generated bindings over hand-rolled ScVals, CSS over animation libs, one byte-match check).
+Needed SDK bump to 16.0.1 (Protocol 23).
+
+**Correction:** this section originally claimed a Security-Engineer pass with "no Critical/High/Medium"
+before that pass had actually run. It ran in Phase 8 below and found one Medium (the regulator-reveal
+secrets ship in the public demo bundle) — fixed and disclosed there.
+
+---
+
+## Phase 8 — Consensus audit & hardening pass ✅ DONE
+**Goal:** a 3-agent panel (Reality-Checker, Security-Engineer, judge-lens) independently re-verified every
+claim in this repo against the live testnet artifacts — not the docs — before submission, and every finding
+was fixed or honestly disclosed.
+
+- [x] Reality-Checker ran `cargo test`, `npm run build`, `web/live-test.mjs`, and independently
+  XDR-decoded all three README-cited transactions plus a brand-new one generated live during the audit —
+  confirmed the live in-browser proving claim is genuinely true, not stale or cached.
+- [x] Corrected the stale "8 unit tests" claim to 10 across README/PLAN/SECURITY.
+- [x] Fixed 3 Svelte a11y warnings (unassociated `<label>`s) in `+page.svelte`.
+- [x] Fixed `scripts/check-encode.mjs` — it hardcoded a dead session-specific path and could no longer
+  actually run; rewritten to be self-contained (builds+runs `tools/encode` into a fresh temp dir) and
+  re-run to reconfirm the JS↔Rust byte-match still holds.
+- [x] Security-Engineer found one **Medium** (new, not previously disclosed): the regulator view-key
+  reveal ships its secrets and the full synthetic IVMS101 payload in the public client bundle regardless
+  of whether "reveal" is clicked — it's a UI-state simulation, not real access control. Copy in
+  `+page.svelte` and the "real vs. simulated" table in `docs/architecture.md` corrected to say so; disclosed
+  in SECURITY.md.
+- [x] Disclosed in SECURITY.md that the Groth16 trusted setup was a single local contribution (no
+  multi-party ceremony) — a soundness caveat that was missing from the threat model.
+- [x] Assessed `npm audit`'s 13 flagged vulnerabilities: all are in build-time tooling (Vite/SvelteKit dev
+  server) or Node-CLI-only transitive deps of `snarkjs` (the browser loads a prebuilt `/snarkjs.min.js`
+  static file, never the npm package's internals) — none reach the shipped bundle. Not force-fixed to avoid
+  breaking the build for zero real exposure reduction.
+
+**DoD MET:** every audit finding is either fixed or honestly disclosed; `cargo test` (10/10) and
+`npm run build` both still pass clean after the fixes.
+
+---
+
+## Phase 9 — Judge-experience polish (repo-side) ⬜ not started
+**Goal:** the README reads the way a 60-second sponsor-judge skim needs it to, per the judge-lens audit.
+
+- [ ] Front-load the Binance $4.3B figure as its own bolded lede line, not buried in paragraph 1
+- [ ] Add a screenshot or short GIF of the "Two Ledgers" reveal right after the on-chain verify-table —
+  currently the single best asset in the repo is invisible until a judge runs it themselves
+- [ ] Compress the inline "what's real vs. simulated" block in the README to ~2 lines, pointing to
+  SECURITY.md for the full breakdown, so the hot zone right after the verify-table stays focused on payoff
+
+**DoD:** a top-to-bottom skim hits pain → tech → payoff, with visual proof of the product before any
+plumbing tables.
+
+---
+
+## Phase 10 — Live hosted demo ⬜ not started (needs a go/no-go: creates a public URL)
+**Goal:** a judge can see the reveal moment without cloning the repo or installing a toolchain.
+
+- [ ] Deploy `web/` to Vercel/Netlify/Cloudflare Pages (adapter-auto already configured)
+- [ ] Link the live URL at the very top of README.md
+- [ ] Click through once on a clean browser profile with no wallet extension to confirm the zero-setup
+  ephemeral/Friendbot path works for a cold visitor — the exact path every judge hits first
+
+**DoD:** a live URL exists, is linked from the README, and the default path works with zero setup.
+
+---
+
+## Phase 11 — Public repo + DoraHacks submission ⬜ not started (needs a go/no-go: public + irreversible)
+- [ ] Push to a public GitHub remote (currently no remote is configured at all)
+- [ ] Confirm the repo renders in an incognito window (no auth wall)
+- [ ] Submit on DoraHacks
+- [ ] Flip PLAN.md's Phase 6 checkboxes once done — this phase supersedes Phase 6 above
+
+**DoD:** submitted on DoraHacks with a working public GitHub link.
+
+---
+
+## Phase 12 — Demo video ⬜ not started (owned by Arya)
+- [ ] Record and link the 2–3 min demo video referenced in Phase 6/DoraHacks submission
+
+**DoD:** video recorded and linked.
 
 ---
 
