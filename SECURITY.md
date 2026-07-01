@@ -1,6 +1,6 @@
 # Veritas — Security & Threat Model
 
-Veritas was reviewed by independent Code-Review and Security-Engineering passes during Phase 1. This
+Veritas was reviewed by independent code-review and security-engineering passes during Phase 1. This
 document records what the zero-knowledge circuit **actually enforces** versus what is **mocked or
 deferred** for the hackathon demo — in the spirit of "an honest work-in-progress over a polished
 mystery."
@@ -46,7 +46,7 @@ The gap between "a sound demo of the mechanism" and "a production compliance sys
 
 ## Contract-level hardening (Phase 2) — implemented & audited
 
-Audited by Code-Review + Security-Engineer passes; the following are implemented in `lib.rs`:
+Audited by independent code-review + security passes; the following are implemented in `lib.rs`:
 
 - Public-signal ordering corrected to snarkjs order `[bracket, registryRoot, attCommitment,
   settlementRef, threshold]` (the scaffold read them in the wrong order — a real bug the review caught).
@@ -69,7 +69,7 @@ the production fix, tracked alongside the in-circuit counterparty signature.
 
 ## Phase 7 / web layer — closing security pass
 
-The Phase 7 live-in-browser-proving code (`web/src/lib/*`) was given a dedicated Security-Engineer pass
+The Phase 7 live-in-browser-proving code (`web/src/lib/*`) was given a dedicated security-engineering pass
 after shipping. Two things not covered by the circuit/contract sections above:
 
 - **The regulator view-key reveal is a client-side UI simulation, not a real access-control boundary.**
@@ -90,8 +90,8 @@ after shipping. Two things not covered by the circuit/contract sections above:
 
 ## Reviews
 
-Phase 1 was audited by a Code-Review pass (found the unranged-`amount` under-constraint) and a
-Security-Engineering threat model (found the unbound-`amount`, self-pairing, signal-ordering, and
-regulator-modelling issues). Phase 7 was audited by a follow-up Security-Engineer pass (found the two
+Phase 1 was audited by a code-review pass (found the unranged-`amount` under-constraint) and a
+security-engineering threat model (found the unbound-`amount`, self-pairing, signal-ordering, and
+regulator-modelling issues). Phase 7 was audited by a follow-up security pass (found the two
 items directly above). The cheap, high-value fixes were applied; the heavyweight items are documented
 rather than faked.

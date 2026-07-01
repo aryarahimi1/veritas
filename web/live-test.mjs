@@ -13,7 +13,7 @@ import { encodeProof } from './src/lib/proof.js';
 const rpcUrl = 'https://soroban-testnet.stellar.org';
 const horizonUrl = 'https://horizon-testnet.stellar.org';
 const { networkPassphrase, contractId } = networks.testnet;
-const B = '/Users/arya/Desktop/projects/veritas/circuits/build';
+const B = new URL('./static/circuit', import.meta.url).pathname; // same proving assets the browser uses
 const FIELD = 0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001n; // BLS12-381 scalar field r
 const EXPLORER = 'https://stellar.expert/explorer/testnet/tx/';
 
@@ -41,7 +41,7 @@ const amount = 1000 + Math.floor(Math.random() * 9000);
 console.log('proving (amount =', amount, ', settlementRef derived from the payment)…');
 const { proof, publicSignals } = await snarkjs.groth16.fullProve(
   buildInput(amount, settlementRef),
-  `${B}/veritas_js/veritas.wasm`,
+  `${B}/veritas.wasm`,
   `${B}/veritas_final.zkey`
 );
 const enc = encodeProof(proof);

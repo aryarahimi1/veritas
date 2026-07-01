@@ -1,7 +1,7 @@
 # Veritas — the business (infrastructure, not a dApp)
 
 A short, honest read on what Veritas is as a company, who buys it, and how it's sold. This is post-hackathon
-thinking; none of it is needed to win the hackathon, and none of it should touch the demo build.
+thinking; none of it is needed for the demo, and none of it should touch the demo build.
 
 ## What it is
 

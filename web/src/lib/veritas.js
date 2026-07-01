@@ -48,7 +48,7 @@ async function ephemeral() {
   return { publicKey: kp.publicKey(), signTransaction, kind: 'ephemeral' };
 }
 
-// ponytail: optional Freighter path — needs the extension (testnet + funded). freighter-api resolves
+// Optional Freighter path — needs the extension (testnet + funded). freighter-api resolves
 // with {error} rather than throwing, so check explicitly and throw -> ensureAccount falls back to ephemeral.
 async function freighter() {
   const f = await import('@stellar/freighter-api');

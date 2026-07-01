@@ -1,9 +1,5 @@
 # Product
 
-## Register
-
-brand
-
 ## Users
 
 **Primary — the people who'd deploy this.** VASP compliance / BSA officers and the regulators who audit
@@ -11,19 +7,20 @@ them. Sober, risk-averse, skeptical by profession; they've watched peers pay nin
 not trust marketing; they trust things they can verify. When they look at Veritas they are asking one
 question: "is this real, and can I prove it did what it says?"
 
-**Secondary — the people who skim it in 60 seconds.** Stellar-ecosystem builders and hackathon judges.
-They need two things fast: the unforgettable moment (proof that this actually works on-chain), and the
-signal that this is genuine *infrastructure others build on*, not a toy app. An integrator must see the
-few lines of code they'd write; a judge must feel the mechanism before they read a word.
+**Secondary — the people who evaluate it in minutes.** Stellar-ecosystem builders and technical
+reviewers. They need two things fast: the unforgettable moment (proof that this actually works
+on-chain), and the signal that this is genuine *infrastructure others build on*, not a toy app. An
+integrator must see the few lines of code they'd write; a first-time viewer must feel the mechanism
+before they read a word.
 
 ## Product Purpose
 
 Veritas is a privacy-preserving Travel Rule (FATF R16) compliance protocol on Stellar: a shared,
 on-chain, forgery-proof *proof-of-compliance* that exchanges generate client-side (PII never leaves them)
 and anchor inside a Soroban smart contract. The public sees a verified check; a regulator with the view
-key opens the full record. This page is the protocol's showcase. Success = a skimming judge trusts it's
-real and remembers the reveal, and an integrator recognizes it as infrastructure they could wire into
-their own systems.
+key opens the full record. This page is the protocol's showcase. Success = a first-time visitor trusts
+it's real and remembers the reveal, and an integrator recognizes it as infrastructure they could wire
+into their own systems.
 
 ## Brand Personality
 

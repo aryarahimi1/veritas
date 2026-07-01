@@ -33,6 +33,10 @@ circuits/**/*_cpp/
 *.secret
 stellar-keys/
 
+# Local working notes / deploy state
+HANDOFF.md
+.contract-id
+
 # OS
 .DS_Store
 Thumbs.db

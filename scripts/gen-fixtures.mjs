@@ -75,7 +75,7 @@ const sample = {
   ivms101: {
     originatorVASP: vasps[0],
     beneficiaryVASP: vasps[1],
-    // TODO(Phase 3): full IVMS101 natural-person fields (name, address, nationalId, dob, ...)
+    // kept minimal here — the full synthetic IVMS101 record lives in web/src/lib/fixtures.js
     note: 'synthetic demo data — no real customer PII'
   }
 };
