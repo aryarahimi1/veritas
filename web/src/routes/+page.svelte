@@ -2,13 +2,17 @@
   import { onMount } from 'svelte';
   import { anchorLive, tamperReject, readAttestation, openWithViewKey, setWallet } from '$lib/veritas.js';
   import { TRANSFER, EXPLORER, VERITAS_CONTRACT, PUBLIC_SIGNALS, TX } from '$lib/fixtures.js';
+  import { DEMO_MODE } from '$lib/config.js';
+  import { contractErrorLabel } from '$lib/errors.js';
 
   let amount = 4200;
   let walletKind = 'ephemeral';
   const pickWallet = (k) => { walletKind = k; setWallet(k); };
-  let stage = 'idle'; // idle | loading | proving | submitting | anchored
+  let stage = 'idle'; // idle | loading | proving | submitting | anchored | failed
   let busy = false;
   let error = '';
+  let failError = ''; // human-readable reason a live run couldn't complete (drives the retry card)
+  let cached = false; // true only when the user explicitly views the previously-anchored proof
   let result = null;
   let live = false;
   let anchoredAt = 0;
@@ -31,6 +35,8 @@
   async function anchor() {
     busy = true;
     error = '';
+    failError = '';
+    cached = false;
     stage = 'loading';
     regulator = false;
     opened = null;
@@ -40,23 +46,53 @@
       result = await anchorLive(amount, (s) => (stage = s));
       live = true;
       if (result.kind) walletKind = result.kind; // reflect a silent ephemeral fallback
+      stage = 'anchored';
+      anchoredAt = Date.now();
+      log = [{ txHash: result.txHash, bracket: result.bracket, live: true, at: Date.now() }, ...log].slice(0, 6);
     } catch (e) {
-      // A-with-fallback: never hard-fail — show the real, previously-anchored on-chain proof.
-      console.warn('live path failed, using cached on-chain proof:', e?.message || e);
-      result = {
-        txHash: TX.submit,
-        bracket: PUBLIC_SIGNALS.bracket,
-        attCommitment: PUBLIC_SIGNALS.attCommitment,
-        settlementRef: PUBLIC_SIGNALS.settlementRef,
-        amount: TRANSFER.amount, // the cached tx actually anchored this amount, not the slider's current value
-        account: '(demo source)'
-      };
-      live = false;
+      // Never blank the screen and never silently swap the amount: surface an explicit retry that
+      // PRESERVES the chosen amount. The cached proof is opt-in only (showCached), so nothing on
+      // screen can contradict the slider.
+      console.warn('live run failed:', e?.message || e);
+      failError = humanizeError(e);
+      stage = 'failed';
+    } finally {
+      busy = false;
     }
+  }
+
+  // Reason text for the retry card — names a real on-chain error when there is one.
+  function humanizeError(e) {
+    const m = String(e?.message || e);
+    const label = contractErrorLabel(m);
+    if (label) return `the contract returned ${label}`;
+    if (/friendbot/i.test(m)) return 'testnet funding (Friendbot) was unavailable';
+    if (/freighter|wallet|denied|reject|access/i.test(m)) return 'the wallet request was declined';
+    if (/rpc|network|timeout|fetch|getaddrinfo|ENOTFOUND/i.test(m)) return 'the testnet RPC was unreachable';
+    return (m.split('\n')[0] || 'the live run could not complete').slice(0, 140);
+  }
+
+  // Explicit, opt-in fallback: show the previously-anchored REAL proof. Snap EVERY panel — including
+  // the slider — to that transaction's own true values, so no panel can contradict another.
+  function showCached() {
+    result = {
+      txHash: TX.submit,
+      bracket: PUBLIC_SIGNALS.bracket,
+      attCommitment: PUBLIC_SIGNALS.attCommitment,
+      settlementRef: PUBLIC_SIGNALS.settlementRef,
+      amount: TRANSFER.amount,
+      account: '(previously anchored)'
+    };
+    amount = TRANSFER.amount; // snap the slider to the cached tx; it stays disabled while cached
+    live = false;
+    cached = true;
+    regulator = false;
+    opened = null;
+    liveRead = null;
+    tamper = null;
+    anchoredAt = 0;
     stage = 'anchored';
-    anchoredAt = Date.now();
-    log = [{ txHash: result.txHash, bracket: result.bracket, live, at: Date.now() }, ...log].slice(0, 6);
-    busy = false;
+    log = [{ txHash: result.txHash, bracket: result.bracket, live: false, at: Date.now() }, ...log].slice(0, 6);
   }
 
   async function toggleRegulator() {
@@ -105,7 +141,10 @@
     liveRead = null;
     tamper = null;
     error = '';
+    failError = '';
     anchoredAt = 0;
+    cached = false;
+    live = false;
   }
 
   // flatten the IVMS record safely for the reveal
@@ -143,13 +182,13 @@
   <!-- input -->
   <section class="compose">
     <div class="parties">
-      <div><label for="originator">Originator VASP <span class="sim">SIMULATED</span></label><b id="originator">{TRANSFER.originator}</b><span>{TRANSFER.originatorJurisdiction}</span></div>
+      <div><label for="originator">Originator VASP {#if DEMO_MODE}<span class="sim">SIMULATED</span>{/if}</label><b id="originator">{TRANSFER.originator}</b><span>{TRANSFER.originatorJurisdiction}</span></div>
       <div class="ar">→</div>
-      <div><label for="beneficiary">Beneficiary VASP <span class="sim">SIMULATED</span></label><b id="beneficiary">{TRANSFER.beneficiary}</b><span>{TRANSFER.beneficiaryJurisdiction}</span></div>
+      <div><label for="beneficiary">Beneficiary VASP {#if DEMO_MODE}<span class="sim">SIMULATED</span>{/if}</label><b id="beneficiary">{TRANSFER.beneficiary}</b><span>{TRANSFER.beneficiaryJurisdiction}</span></div>
     </div>
     <div class="slider">
       <label for="amount">Transfer amount (hidden on-chain — only the bracket is proven)</label>
-      <input id="amount" type="range" min="100" max="10000" step="100" bind:value={amount} disabled={busy} />
+      <input id="amount" type="range" min="100" max="10000" step="100" bind:value={amount} disabled={busy || cached || stage === 'anchored'} />
       <div class="amtrow"><span class="amt mono">{amount.toLocaleString()} USDC</span>
         <span class="bracket" class:full={amount >= 1000}>{amount >= 1000 ? 'FULL IVMS101 (≥ $1,000)' : 'reduced (< $1,000)'}</span></div>
     </div>
@@ -160,6 +199,15 @@
     </div>
     {#if stage === 'idle'}
       <button class="primary" on:click={anchor} disabled={busy}>Generate ZK proof + anchor on Stellar</button>
+    {:else if stage === 'failed'}
+      <div class="failcard" role="alert">
+        <div class="failmsg">⚠ Live run couldn't complete — {failError}.</div>
+        <div class="failacts">
+          <button class="primary sm" on:click={anchor} disabled={busy}>↻ Retry live</button>
+          <button class="ghost sm" on:click={showCached} disabled={busy}>Show last verified on-chain proof</button>
+        </div>
+        <p class="failnote">Retry keeps your <b>{amount.toLocaleString()} USDC</b>. Nothing is faked — the alternative shows a real transfer previously anchored on-chain (tx {short(TX.submit, 6)}).</p>
+      </div>
     {:else if stage !== 'anchored'}
       <button class="primary" disabled aria-busy="true"><span class="spin">◜</span> {stageLabel[stage] ?? 'working…'}</button>
     {:else}
@@ -169,11 +217,18 @@
   </section>
 
   {#if stage === 'anchored' && result}
+    {#if cached}
+      <div class="cachedbanner" role="status">
+        CACHED — a real transfer previously anchored on-chain (tx
+        <a href={`${EXPLORER}/tx/${TX.submit}`} target="_blank" rel="noreferrer">{short(TX.submit, 8)} ↗</a>), not this
+        session's live run. Every panel below reflects that transaction.
+      </div>
+    {/if}
     <!-- the two ledgers -->
     <section class="ledgers">
       <!-- LEFT: public -->
       <div class="pane public">
-        <div class="ph"><span>What the chain sees</span>{#if live}<span class="badge real">VERIFIED ON-CHAIN</span>{:else}<span class="badge cached">CACHED (live run unavailable)</span>{/if}</div>
+        <div class="ph"><span>What the chain sees</span>{#if live}<span class="badge real">VERIFIED ON-CHAIN</span>{:else}<span class="badge cached">PREVIOUSLY ANCHORED</span>{/if}</div>
         <div class="verdict">✓ Travel-Rule compliant</div>
         <dl>
           <div><dt>Originator</dt><dd class="redact">████████████</dd></div>
@@ -189,7 +244,7 @@
         </div>
         <div class="acts">
           <button class="ghost" on:click={doReadLive} disabled={busy}>read live from chain</button>
-          <button class="ghost danger" on:click={doTamper} disabled={busy}>try to forge it</button>
+          {#if DEMO_MODE}<button class="ghost danger" on:click={doTamper} disabled={busy}>try to forge it</button>{/if}
         </div>
         {#if liveRead}
           <p class="readout mono">{liveRead.error ? 'read error' : liveRead.missing ? 'not found' : `chain → bracket=${liveRead.bracket}, submitter=${short(liveRead.submitter, 4)}, ledger=${liveRead.ledger}`}</p>
@@ -286,6 +341,12 @@
   .spin{display:inline-block;animation:spin 1s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
   .err{color:#f0a59b;font-size:.82rem;margin:.6rem 0 0}
+  .failcard{margin-top:1.1rem;background:#1a1206;border:1px solid #5a4818;border-radius:12px;padding:.9rem 1.1rem}
+  .failmsg{color:#e7c07a;font-size:.86rem;font-weight:600}
+  .failacts{display:flex;gap:.6rem;margin-top:.7rem;flex-wrap:wrap}
+  .failnote{color:#9a8a6a;font-size:.74rem;margin:.7rem 0 0;max-width:60ch}
+  .cachedbanner{margin-top:1rem;background:#2a2207;border:1px solid #5a4818;border-radius:10px;padding:.6rem .9rem;color:#e7c07a;font-size:.8rem;font-weight:600}
+  .cachedbanner a{color:#f0cd86;text-decoration:underline}
   .ledgers{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
   .pane{border-radius:14px;padding:1.1rem 1.3rem;min-height:300px}
   .ph{display:flex;justify-content:space-between;align-items:center;font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;margin-bottom:.9rem}

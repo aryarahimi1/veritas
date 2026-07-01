@@ -5,6 +5,7 @@ import { buildInput, randomSettlementRef } from './witness.js';
 import { recomputeAttCommitment } from './attestation.js';
 import { encodeProof } from './proof.js';
 import { IVMS101_ATTESTATION } from './fixtures.js';
+import { parseContractError } from './errors.js';
 
 const { basicNodeSigner } = contract;
 const RPC = 'https://soroban-testnet.stellar.org';
@@ -123,9 +124,10 @@ export async function tamperReject(amount) {
     return { rejected: false }; // should not happen
   } catch (e) {
     const m = String(e?.message || e);
-    const onChain = m.includes('#3') || /ProofInvalid|Error\(Contract/i.test(m);
+    const ce = parseContractError(m);
+    const onChain = !!ce || /Error\(Contract/i.test(m);
     return onChain
-      ? { rejected: true, reason: /ProofInvalid/i.test(m) || m.includes('#3') ? 'ProofInvalid' : m.split('\n')[0] }
+      ? { rejected: true, code: ce?.code ?? 3, reason: ce ? `#${ce.code} ${ce.name}` : 'rejected on-chain' }
       : { rejected: false, localError: m.split('\n')[0] };
   }
 }
