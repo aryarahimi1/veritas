@@ -32,9 +32,12 @@ The gap between "a sound demo of the mechanism" and "a production compliance sys
   a ciphertext: the regulator "opens" it by reconstructing the committed tuple and checking it against
   the on-chain commitment — it cannot be decrypted from the chain alone, and `regulatorKey` is currently
   prover-chosen. *Production:* pin the regulator key and use verifiable encryption (ElGamal/ECIES).
-- **settlementRef ↔ real payment.** The circuit binds a `settlementRef` value but does not check it
-  corresponds to a real Stellar payment's parties/amount. *Production:* bind it to the actual on-chain
-  payment; the contract additionally `require_auth()`s the originating VASP to stop anonymous
+- **settlementRef ↔ real payment.** The demo now sends a **real testnet settlement payment** and derives
+  the proof's `settlementRef` from that payment's tx hash, so the payment and the compliance proof share
+  one on-chain settlement id (UI/flow linkage — two linked txs on stellar.expert). But the **circuit does
+  not yet constrain** `settlementRef` to equal `H(payment from, to, amount, asset)`, so it is not
+  cryptographically bound to the payment's parties/value. *Production (PLAN.md Phase 21):* enforce that
+  equality in-circuit; the contract additionally `require_auth()`s the originating VASP to stop anonymous
   attestation-squatting.
 - **Counterparty authority.** The circuit proves the leaves are in the registry, not that the prover
   controls them. *Production:* prove knowledge of the secret behind each leaf (A and B both sign).

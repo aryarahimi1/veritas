@@ -160,46 +160,154 @@ was fixed or honestly disclosed.
 
 ---
 
-## Phase 9 — Judge-experience polish (repo-side) ⬜ not started
-**Goal:** the README reads the way a 60-second sponsor-judge skim needs it to, per the judge-lens audit.
+## Finish-line plan (Phases 9–27) — two tracks
 
-- [ ] Front-load the Binance $4.3B figure as its own bolded lede line, not buried in paragraph 1
-- [ ] Add a screenshot or short GIF of the "Two Ledgers" reveal right after the on-chain verify-table —
-  currently the single best asset in the repo is invisible until a judge runs it themselves
-- [ ] Compress the inline "what's real vs. simulated" block in the README to ~2 lines, pointing to
-  SECURITY.md for the full breakdown, so the hot zone right after the verify-table stays focused on payoff
+After the Phase-8 audit, an expert panel (hackathon strategy, blockchain security, frontend, product,
+architecture) reconciled the remaining work into two **honestly-labeled** tracks — the trophy is decided by a
+~60-second sponsor-judge skim, and most company work is invisible to it. **WIN** = moves the skim. **PRODUCT** =
+real company, invisible to the skim. **BOTH** = a contingent win-sliver on top of company value. This plan
+supersedes the earlier thinner Phases 9–12 (judge-polish / live-demo / submission / video), which it absorbs and
+expands. *(Working-branch commits are tagged "Phase 8–13" from the panel's win-track numbering; they map 1:1 to
+Phases 9–14 here.)*
 
-**DoD:** a top-to-bottom skim hits pain → tech → payoff, with visual proof of the product before any
-plumbing tables.
+### Win track — Phases 9–15
 
----
+## Phase 9 — Kill the cached-fallback contradiction ✅ DONE · WIN (`a68e2b5`)
+**Goal:** make it structurally impossible for the demo to render a bracket/amount that contradicts another panel.
+- On a failed live run, stop silently swapping in the cached proof under the user's slider value; show an explicit
+  **Retry live** card that *preserves the chosen amount*, with the cached proof behind an opt-in button.
+- `showCached()` snaps every panel AND the slider to the cached tx's own values under a loud banner; the slider
+  locks once anchored so a post-run drag can't re-create the contradiction.
+- Tamper button + SIMULATED badges stay visible via `DEMO_MODE` (`VITE_VERITAS_ENV`); the 7 contract error codes
+  are surfaced by name (`web/src/lib/errors.js`).
 
-## Phase 10 — Live hosted demo ⬜ not started (needs a go/no-go: creates a public URL)
-**Goal:** a judge can see the reveal moment without cloning the repo or installing a toolchain.
+**DoD MET:** build green; cached fixture verified self-consistent (recomputed commitment === anchored value); an
+adversarial Code-Review pass found + fixed one slider-lock gap.
 
-- [ ] Deploy `web/` to Vercel/Netlify/Cloudflare Pages (adapter-auto already configured)
-- [ ] Link the live URL at the very top of README.md
-- [ ] Click through once on a clean browser profile with no wallet extension to confirm the zero-setup
-  ephemeral/Friendbot path works for a cold visitor — the exact path every judge hits first
+## Phase 10 — Live-proving reliability ✅ DONE · WIN (`0841369`)
+**Goal:** maximize the odds the room sees a real live run, not the fallback.
+- `prewarm()` warms snarkjs + wasm + zkey and pre-funds an account on mount; `submitWithRetry` retries once
+  (optionally against `VITE_RPC_URL_BACKUP`) on transient RPC hiccups but never on a deterministic contract error;
+  an optional stable faucet signer (`VITE_DEMO_FUND_SECRET`) keeps the run LIVE if Friendbot fails; a `preflight()`
+  status dot shows reachability.
 
-**DoD:** a live URL exists, is linked from the README, and the default path works with zero setup.
+**DoD MET:** build green; happy path unchanged, failure paths additive. *(Live network paths must be exercised on
+the demo machine — the build sandbox can't reach Friendbot/RPC.)*
 
----
+## Phase 11 — Bind the proof to a real Stellar payment ✅ DONE · BOTH (`70c9a27`)
+**Goal:** make Stellar the on-screen protagonist twice — a real payment AND its compliance proof, one settlement id.
+- Before proving, send a REAL testnet settlement payment (A → fresh B via `createAccount`) and derive
+  `settlementRef` from its tx hash; render both txs (payment ↦ compliance) as stellar.expert deep-links.
+- Feature-flagged (`VITE_REAL_PAYMENT`), graceful fallback to a nonce ref; no circuit/contract change.
 
-## Phase 11 — Public repo + DoraHacks submission ⬜ not started (needs a go/no-go: public + irreversible)
-- [ ] Push to a public GitHub remote (currently no remote is configured at all)
-- [ ] Confirm the repo renders in an incognito window (no auth wall)
-- [ ] Submit on DoraHacks
-- [ ] Flip PLAN.md's Phase 6 checkboxes once done — this phase supersedes Phase 6 above
+**DoD MET:** build green (Horizon bundles); ref derivation verified consistent (`FIELD === witness P`, canonical,
+equals `pub_signals[3]`); `live-test.mjs` extended to assert the linkage. *(Payment path to be verified live.)*
 
-**DoD:** submitted on DoraHacks with a working public GitHub link.
+## Phase 12 — Positioning ($4.3B, why Stellar) ✅ DONE · WIN (`fa708cf`)  *(absorbs old "judge-experience polish")*
+**Goal:** the first screen states the pain number, what Veritas is, and why *Stellar specifically*.
+- README reframed to "why ZK, why on-chain, and why Stellar" — Soroban's native BLS12-381 host functions
+  (~41M/100M CPU) are the load-bearing reason; the real-payment story folded in; app hero + footer sharpened.
 
----
+**DoD MET:** README leads with `$4.3B`; the one-liner + why-Stellar appear on README, app hero, and footer.
+*(Still open for Arya: a screenshot/GIF of the "Two Ledgers" reveal in the README — a repo asset only you can
+capture.)*
 
-## Phase 12 — Demo video ⬜ not started (owned by Arya)
-- [ ] Record and link the 2–3 min demo video referenced in Phase 6/DoraHacks submission
+## Phase 13 — Static SPA build for deployment ✅ DONE (deploy = Arya) · WIN (`625ce3c`)  *(absorbs old "live hosted demo")*
+**Goal:** a static SPA a judge can open on an owned HTTPS URL where in-browser proving works.
+- `adapter-auto` → `adapter-static` (SPA); intentionally **no** COOP/COEP (would break cross-origin
+  Friendbot/RPC/Horizon fetches); `web/vercel.json` (static output, immutable asset cache, SPA rewrite);
+  `.env.example` refreshed to the real `VITE_` knobs.
 
-**DoD:** video recorded and linked.
+**DoD MET (engineering):** static build emits `index.html` + `_app` + all proving assets. **Deploy is yours**
+(needs your Vercel account) — one command in **HANDOFF.md**; then add the URL to README + DoraHacks.
+
+## Phase 14 — Fresh-tx indexing gate + link/surface sweep ✅ DONE · WIN (`7ab1b0d`)
+**Goal:** every clickable surface resolves; a fresh-tx link never 404s in the skim.
+- Gate fresh-tx explorer links behind a ~6s indexing grace ("hash · indexing…"), then link; cached txs link
+  immediately. `scripts/check-links.mjs` curls every doc + on-chain link.
+
+**DoD MET:** build green; link checker ran **6/6 links 200**.
+
+## Phase 15 — Public repo + DoraHacks submission 🔄 ARYA · WIN  *(absorbs old submission + video phases)*
+**Goal:** the one-time submission — held for you (outward-facing + irreversible).
+- Push the repo public under your GitHub account; deploy `web/` to Vercel; add the live URL to the README
+  "Verify it yourself" table + the DoraHacks entry; record the 2–3 min video; submit **all-in on the single
+  Stellar prize track**.
+
+**DoD:** repo public; DoraHacks submitted with the owned URL + public repo; every link resolves. See **HANDOFF.md**.
+
+### Product track — Phases 16–27 (real company; honestly invisible to the 60-second skim)
+
+Each is desired for the *product*, not the trophy. Every circuit/contract-touching phase is done on an isolated
+branch/worktree with the full live path re-verified before merge; **main always stays demo-shippable**.
+
+## Phase 16 — Wedge & partner-with GTM ⬜ PRODUCT
+ICP = Stellar-native stablecoin VASPs/anchors; position as the on-chain proof layer that **partners with**
+Notabene/Sygna/TRP (which move the PII) rather than competing. **DoD:** one-page ICP + wedge doc; partner-with
+thesis validated by a real conversation; one design partner committed to a sandboxed pilot. *(See docs/business.md.)*
+
+## Phase 17 — On-chain governance & versioning rails ⬜ PRODUCT
+Updatable registry root + VK upgrade hook via **threshold multisig + timelock**, with a hard invariant that
+governance can never alter/forge a *stored* attestation. Kept OFF the demo build (the demo keeps its immutable
+"no backdoor" narrative). **DoD:** on an isolated contract, a full governance cycle demonstrated (rotate root,
+adopt new VK, old proofs rejected, stored attestations byte-identical, unauthorized calls revert).
+
+## Phase 18 — Real counterparty + originator ⬜ BOTH
+In-circuit EdDSA-Poseidon signature by VASP B over `(settlementRef, ivmsHash)`; bind the submitter as a public
+signal + prove knowledge of the VASP-A leaf secret (closes SECURITY.md HIGH-2). **Win-sliver (contingent):** a
+second live on-chain rejection ("wrong identity → rejected"). **DoD:** circuit rejects a missing B-signature /
+wrong submitter; fresh instance verifies on testnet; in-browser prove time still acceptable.
+
+## Phase 19 — Secret-commitment registry leaves ⬜ PRODUCT
+Replace guessable LEI-hash leaves with hiding commitments `Poseidon(vaspPubkey, blinding)` + proof-of-knowledge,
+so an observer can't tell which VASP a leaf is. **DoD:** membership proven under hiding leaves; governed root
+rotation exercised; full live path verified on a fresh/upgraded instance.
+
+## Phase 20 — Verifiable encryption of the regulator record ⬜ BOTH
+Replace commitment-reconstruction with real in-circuit encryption to a **pinned regulator pubkey**, so the
+regulator genuinely DECRYPTS with a private view key. **Win-sliver (contingent):** the hero reveal becomes a real
+decryption. **HARD GATE:** if it slows in-browser proving below the demo budget, it stays a server-proving PRODUCT
+path and does NOT merge to the demo build. **DoD:** regulator decrypts an on-chain ciphertext; encryption proven
+correct in-circuit; live proving still fast enough (or explicitly parked).
+
+## Phase 21 — Bind settlementRef in-circuit ⬜ PRODUCT
+Constrain `settlementRef == H(payment from, to, amount, asset)` in-circuit so the regulator can prove the opened
+amount equals the real payment value (soundness backfill for Phase 11's UI linkage). **DoD:** circuit rejects a
+`settlementRef` that isn't the payment field-hash; regulator can show opened amount == on-chain payment value.
+
+## Phase 22 — Multi-tenant control plane + product UI ⬜ PRODUCT
+API keys/quotas; a DB that is a **read-model of chain** (no PII persisted); org/role model; dashboard, transfer
+list w/ per-record detail, VASP registry screen, exportable audit log; the 7 error codes as a first-class taxonomy.
+Gated behind `VITE_VERITAS_ENV=prod`; the demo `/` route untouched. **DoD:** a new org self-serves a sandbox key,
+drives a submission through its status machine, exports a signed audit log — read-model proven to match chain.
+
+## Phase 23 — Async proving service + submission relayer ⬜ PRODUCT
+Client-side proving stays the DEFAULT (zero PII at Veritas); opt-in server-side proving in an isolated,
+in-memory-only worker (no PII logs, zeroized). Relayer with `settlementRef` idempotency, retries, signed webhooks.
+**DoD:** load test with zero double-anchors under retry storms; a scrub test proves server-side proving leaves no
+PII on disk or in logs.
+
+## Phase 24 — Independent audit + real trusted-setup ceremony ⬜ PRODUCT (gate before real PII/funds)
+Separate ZK-circuit and Soroban-contract audits; a real multi-party ceremony with a public transcript (or a
+setup-free proof system); adopt the audited VK via the Phase-17 upgrade path; publish a trust-center page.
+**DoD:** both audit reports clean; ceremony transcript independently verifiable; production VK live, full path
+green. *(This is the earlier roadmap's "blocker gate" — correctly placed here, after submission, not before.)*
+
+## Phase 25 — Make the regulator side real ⬜ PRODUCT
+Prefer "Veritas never custodies PII": verifiable encryption to the regulator pubkey (Phase 20) with the private
+key in an HSM; isolated regulator auth/trust domain; case/legal-basis reference + immutable "who opened what" log.
+**DoD:** a regulator opens a record only via their HSM key; operators provably cannot decrypt; every open logged.
+
+## Phase 26 — Mainnet readiness & operations ⬜ PRODUCT
+Fee/sponsorship so VASPs hold no XLM; incident-response runbook for the immutable contract; monitoring; CI security
+gates (SAST/deps/secrets + a VK-drift gate); legal sign-off; WCAG AA pass; a bounded mainnet pilot. **DoD:** a
+mainnet transfer anchored with sponsored fees; runbook dry-run tested; legal sign-off on file. *(Do NOT chase
+mainnet before submission — it risks the stable testnet demo.)*
+
+## Phase 27 — Package & scale ⬜ PRODUCT
+Live pricing + self-serve onboarding, docs + sandbox to public quality, a design-partner case study, more
+settlement rails/registries via the versioned registry model. **DoD:** a new VASP signs up and goes live
+self-serve under published pricing; a case study with real pilot numbers.
 
 ---
 
