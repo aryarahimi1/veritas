@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { anchorLive, tamperReject, readAttestation, openWithViewKey, setWallet, prewarm, preflight } from '$lib/veritas.js';
-  import { TRANSFER, EXPLORER, VERITAS_CONTRACT, PUBLIC_SIGNALS, TX } from '$lib/fixtures.js';
+  import { TRANSFER, EXPLORER, VERITAS_CONTRACT, GROTH16_VERIFIER, PUBLIC_SIGNALS, TX } from '$lib/fixtures.js';
   import { DEMO_MODE } from '$lib/config.js';
   import { contractErrorLabel } from '$lib/errors.js';
 
@@ -174,259 +174,613 @@
         commitmentMatch: opened.commitmentMatch
       }
     : null;
+
+  // reveal-on-scroll (adds .is-in when a section enters the viewport). A safety timer guarantees the
+  // section is never left hidden, even if it is below the fold and never scrolled to.
+  function reveal(node) {
+    let io;
+    let done = false;
+    const show = () => { if (!done) { done = true; node.classList.add('is-in'); if (io) io.disconnect(); } };
+    io = new IntersectionObserver(([e]) => { if (e.isIntersecting) show(); }, { threshold: 0.1, rootMargin: '0px 0px -8% 0px' });
+    io.observe(node);
+    const t = setTimeout(show, 900);
+    return { destroy() { clearTimeout(t); io.disconnect(); } };
+  }
+
+  // the integration surface a VASP wires into its backend (the demo above runs this exact flow client-side)
+  const INTEGRATE = `import { Veritas } from '@veritas/sdk';
+
+// inside VASP A's backend — the customer PII never leaves your systems
+const veritas = new Veritas({ network: 'stellar', signer });
+
+const { proof, settlementRef } = await veritas.prove({
+  ivms101,                         // the Travel Rule payload you already build
+  amount,                          // hidden on-chain; only the bracket is proven
+  counterparty: beneficiaryVaspId  // both counterparties in the licensed-VASP registry
+});
+
+// anchor the PII-free receipt inside the Soroban contract, on Stellar
+const { txHash } = await veritas.anchor({ proof, settlementRef });
+// -> anyone can verify txHash on stellar.expert; no identity is ever revealed`;
+  let copied = false;
+  async function copyCode() {
+    try {
+      await navigator.clipboard.writeText(INTEGRATE);
+      copied = true;
+      setTimeout(() => (copied = false), 1600);
+    } catch (e) {
+      /* clipboard blocked — the snippet is still selectable */
+    }
+  }
 </script>
 
-<div class="bar">
-  <span class="dot" class:amber={health === 'degraded' || health === 'checking'} class:down={health === 'down'} title={health === 'ready' ? 'live proving + testnet reachable' : health === 'checking' ? 'checking reachability…' : health === 'degraded' ? 'partially reachable — a live run may fall back to cached' : 'testnet unreachable — runs will use the cached proof'} /> TESTNET
-  <span class="sep">·</span>
-  <span class="mono">contract {short(VERITAS_CONTRACT, 6)}</span>
-  <a class="barlink" href={`${EXPLORER}/contract/${VERITAS_CONTRACT}`} target="_blank" rel="noreferrer">verify ↗</a>
-</div>
+<header class="topbar">
+  <div class="wrap barwrap">
+    <span class="brand"><span class="brandmark" aria-hidden="true"></span> Veritas</span>
+    <span class="net">
+      <span class="dot" class:amber={health === 'degraded' || health === 'checking'} class:down={health === 'down'}
+        title={health === 'ready' ? 'live proving + testnet reachable' : health === 'checking' ? 'checking reachability…' : health === 'degraded' ? 'partially reachable — a live run may fall back to cached' : 'testnet unreachable — runs will use the cached proof'} />
+      Stellar testnet
+    </span>
+    <span class="sep" aria-hidden="true">/</span>
+    <span class="mono contractid">{short(VERITAS_CONTRACT, 5)}</span>
+    <a class="verify-top" href={`${EXPLORER}/contract/${VERITAS_CONTRACT}`} target="_blank" rel="noreferrer">verify contract ↗</a>
+  </div>
+</header>
 
 <main>
-  <header>
-    <h1>Veritas</h1>
-    <p class="tag">One zero-knowledge proof, verified inside a <b>Soroban</b> smart contract on <b>Stellar</b>, proves a cross-VASP stablecoin transfer followed the FATF Travel Rule — with <b>no customer identity on-chain</b>. Every run is a real proof and a real Stellar transaction.</p>
-  </header>
-
-  <!-- input -->
-  <section class="compose">
-    <div class="parties">
-      <div><label for="originator">Originator VASP {#if DEMO_MODE}<span class="sim">SIMULATED</span>{/if}</label><b id="originator">{TRANSFER.originator}</b><span>{TRANSFER.originatorJurisdiction}</span></div>
-      <div class="ar">→</div>
-      <div><label for="beneficiary">Beneficiary VASP {#if DEMO_MODE}<span class="sim">SIMULATED</span>{/if}</label><b id="beneficiary">{TRANSFER.beneficiary}</b><span>{TRANSFER.beneficiaryJurisdiction}</span></div>
-    </div>
-    <div class="slider">
-      <label for="amount">Transfer amount (hidden on-chain — only the bracket is proven)</label>
-      <input id="amount" type="range" min="100" max="10000" step="100" bind:value={amount} disabled={busy || cached || stage === 'anchored'} />
-      <div class="amtrow"><span class="amt mono">{amount.toLocaleString()} USDC</span>
-        <span class="bracket" class:full={amount >= 1000}>{amount >= 1000 ? 'FULL IVMS101 (≥ $1,000)' : 'reduced (< $1,000)'}</span></div>
-    </div>
-    <div class="wallet">
-      <span>Sign with</span>
-      <button class="seg" class:on={walletKind === 'ephemeral'} on:click={() => pickWallet('ephemeral')} disabled={busy}>Ephemeral · auto-funded</button>
-      <button class="seg" class:on={walletKind === 'freighter'} on:click={() => pickWallet('freighter')} disabled={busy}>Freighter wallet</button>
-    </div>
-    {#if stage === 'idle'}
-      <button class="primary" on:click={anchor} disabled={busy}>Generate ZK proof + anchor on Stellar</button>
-    {:else if stage === 'failed'}
-      <div class="failcard" role="alert">
-        <div class="failmsg">⚠ Live run couldn't complete — {failError}.</div>
-        <div class="failacts">
-          <button class="primary sm" on:click={anchor} disabled={busy}>↻ Retry live</button>
-          <button class="ghost sm" on:click={showCached} disabled={busy}>Show last verified on-chain proof</button>
-        </div>
-        <p class="failnote">Retry keeps your <b>{amount.toLocaleString()} USDC</b>. Nothing is faked — the alternative shows a real transfer previously anchored on-chain (tx {short(TX.submit, 6)}).</p>
+  <!-- HERO -->
+  <section class="hero">
+    <div class="wrap">
+      <p class="eyebrow">FATF Travel Rule · Stellar / Soroban</p>
+      <h1>Proof of compliance,<br />with no identity on-chain.</h1>
+      <p class="lede">
+        Veritas is a privacy-preserving Travel Rule compliance protocol. A single zero-knowledge proof,
+        verified inside a Soroban smart contract, attests that a cross-VASP stablecoin transfer followed
+        FATF Recommendation 16, without putting one customer detail on-chain. The public sees a verified
+        seal; a regulator holding the view key opens the full record.
+      </p>
+      <div class="hero-cta">
+        <a href="#demo" class="btn primary">See the live proof</a>
+        <a class="btn ghost" href={`${EXPLORER}/contract/${VERITAS_CONTRACT}`} target="_blank" rel="noreferrer">Verify on testnet ↗</a>
       </div>
-    {:else if stage !== 'anchored'}
-      <button class="primary" disabled aria-busy="true"><span class="spin">◜</span> {stageLabel[stage] ?? 'working…'}</button>
-    {:else}
-      <button class="ghost" on:click={reset} disabled={busy}>↺ run again</button>
-    {/if}
-    {#if error}<p class="err" role="alert">{error}</p>{/if}
+      <aside class="figure">
+        <span class="figure-n">$4.3B</span>
+        <p>
+          what Binance paid U.S. regulators in 2023, for exactly the cross-border customer-data failures
+          the Travel Rule exists to prevent. Today there is still no shared, verifiable proof a compliance
+          check ever happened. Veritas is that proof.
+        </p>
+      </aside>
+    </div>
   </section>
 
-  {#if stage === 'anchored' && result}
-    {#if cached}
-      <div class="cachedbanner" role="status">
-        CACHED — a real transfer previously anchored on-chain (tx
-        <a href={`${EXPLORER}/tx/${TX.submit}`} target="_blank" rel="noreferrer">{short(TX.submit, 8)} ↗</a>), not this
-        session's live run. Every panel below reflects that transaction.
-      </div>
-    {/if}
-    <!-- the two ledgers -->
-    <section class="ledgers">
-      <!-- LEFT: public -->
-      <div class="pane public">
-        <div class="ph"><span>What the chain sees</span>{#if live}<span class="badge real">VERIFIED ON-CHAIN</span>{:else}<span class="badge cached">PREVIOUSLY ANCHORED</span>{/if}</div>
-        <div class="verdict">✓ Travel-Rule compliant</div>
-        <dl>
-          <div><dt>Originator</dt><dd class="redact">████████████</dd></div>
-          <div><dt>Beneficiary</dt><dd class="redact">█████████</dd></div>
-          <div><dt>Amount</dt><dd class="redact">██████</dd></div>
-          <div><dt>Bracket</dt><dd>{result.bracket === 1 ? 'full IVMS101' : 'reduced'}</dd></div>
-          <div><dt>Commitment</dt><dd class="mono sm">{short(result.attCommitment, 8)}</dd></div>
-          <div><dt>Settlement</dt><dd class="mono sm">{short(result.settlementRef, 8)}</dd></div>
-        </dl>
-        <div class="tx">
-          {#if cached || txIndexed}
-            <a href={`${EXPLORER}/tx/${result.txHash}`} target="_blank" rel="noreferrer" class="mono">{short(result.txHash, 8)} ↗</a>
-          {:else}
-            <span class="mono indexing" role="status">{short(result.txHash, 8)} · indexing…</span>
-          {/if}
-          {#if live}<span class="age" role="status">confirmed {ageSec}s ago</span>{/if}
-        </div>
-        {#if result.paymentTx && (cached || txIndexed)}
-          <div class="settlebind">
-            <span class="sbl">Settlement on Stellar</span>
-            <a href={`${EXPLORER}/tx/${result.paymentTx}`} target="_blank" rel="noreferrer" class="mono">payment {short(result.paymentTx, 6)} ↗</a>
-            <span class="sarrow">↦</span>
-            <a href={`${EXPLORER}/tx/${result.txHash}`} target="_blank" rel="noreferrer" class="mono">compliance {short(result.txHash, 6)} ↗</a>
-            <span class="dim sbl2">both bound to settlement {short(result.settlementRef, 6)}</span>
-          </div>
-        {/if}
-        <div class="acts">
-          <button class="ghost" on:click={doReadLive} disabled={busy}>read live from chain</button>
-          {#if DEMO_MODE}<button class="ghost danger" on:click={doTamper} disabled={busy}>try to forge it</button>{/if}
-        </div>
-        {#if liveRead}
-          <p class="readout mono">{liveRead.error ? 'read error' : liveRead.missing ? 'not found' : `chain → bracket=${liveRead.bracket}, submitter=${short(liveRead.submitter, 4)}, ledger=${liveRead.ledger}`}</p>
-        {/if}
-        {#if tamper}
-          <p class="readout" class:bad={tamper.rejected}>{tamper.running ? 'submitting a tampered proof…' : tamper.rejected ? `contract REJECTED on-chain: ${tamper.reason}` : tamper.localError ? `couldn't reach contract: ${tamper.localError}` : 'unexpectedly accepted'}</p>
-        {/if}
-      </div>
+  <!-- DEMO -->
+  <section id="demo" class="band demo">
+    <div class="wrap">
+      <div class="section-head"><span class="idx">01</span><h2>Anchor a compliant transfer, live on testnet</h2></div>
 
-      <!-- RIGHT: private -->
-      <div class="pane private" class:open={regulator}>
-        <div class="ph"><span>The full truth</span><span class="badge {regulator ? 'real' : 'lock'}">{regulator ? 'VIEW-KEY APPLIED' : 'SEALED'}</span></div>
-        {#if !regulator}
-          <div class="vault">
-            <div class="lock">⬡</div>
-            <p>Simulates what a regulator holding the view key would see. The chain itself holds only a commitment — no identity, no amount.</p>
-            <button class="primary sm" on:click={toggleRegulator} disabled={busy}>{busy ? 'opening…' : 'Apply regulator view-key'}</button>
+      <div class="compose">
+        <div class="parties">
+          <div class="party">
+            <span class="plabel">Originator VASP {#if DEMO_MODE}<span class="sim">simulated</span>{/if}</span>
+            <b id="originator">{TRANSFER.originator}</b>
+            <span class="juris">{TRANSFER.originatorJurisdiction}</span>
           </div>
-        {:else if rev}
-          <div class="truth">
-            <div class="match">opened with the regulator view-key <span class="ok">✓</span></div>
-            {#if rev.commitmentMatch === true}
-              <div class="match">attCommitment recomputed from these fields — matches the value anchored on-chain <span class="ok">✓</span></div>
-            {:else if rev.commitmentMatch === false}
-              <div class="match">attCommitment recomputed from these fields — does <b>not</b> match the anchored value <span class="warn">✗</span></div>
-            {/if}
-            <div class="cols">
-              <div><h4>Originator</h4><b>{rev.oName}</b><span>{rev.oAddr}</span><span class="dim">DOB {rev.oDob}</span><span class="dim">{rev.oVasp?.name} · {rev.oVasp?.lei}</span></div>
-              <div><h4>Beneficiary</h4><b>{rev.bName}</b><span>{rev.bAddr}</span><span class="dim">{rev.bVasp?.name} · {rev.bVasp?.lei}</span></div>
+          <span class="flow" aria-hidden="true">→</span>
+          <div class="party">
+            <span class="plabel">Beneficiary VASP {#if DEMO_MODE}<span class="sim">simulated</span>{/if}</span>
+            <b id="beneficiary">{TRANSFER.beneficiary}</b>
+            <span class="juris">{TRANSFER.beneficiaryJurisdiction}</span>
+          </div>
+        </div>
+
+        <div class="slider">
+          <label for="amount">Transfer amount <span class="hint">— hidden on-chain, only the bracket is proven</span></label>
+          <input id="amount" type="range" min="100" max="10000" step="100" bind:value={amount} disabled={busy || cached || stage === 'anchored'} />
+          <div class="amtrow">
+            <span class="amt mono">{amount.toLocaleString()}<span class="ccy"> USDC</span></span>
+            <span class="bracket" class:full={amount >= 1000}>{amount >= 1000 ? 'full IVMS101 · ≥ $1,000' : 'reduced · < $1,000'}</span>
+          </div>
+        </div>
+
+        <div class="wallet">
+          <span class="wl">Sign with</span>
+          <button class="seg" class:on={walletKind === 'ephemeral'} on:click={() => pickWallet('ephemeral')} disabled={busy}>Ephemeral · auto-funded</button>
+          <button class="seg" class:on={walletKind === 'freighter'} on:click={() => pickWallet('freighter')} disabled={busy}>Freighter wallet</button>
+        </div>
+
+        {#if stage === 'idle'}
+          <button class="btn primary block" on:click={anchor} disabled={busy}>Generate ZK proof &amp; anchor on Stellar</button>
+        {:else if stage === 'failed'}
+          <div class="failcard" role="alert">
+            <div class="failmsg"><span class="fx" aria-hidden="true">!</span> Live run couldn't complete — {failError}.</div>
+            <div class="failacts">
+              <button class="btn primary sm" on:click={anchor} disabled={busy}>↻ Retry live</button>
+              <button class="btn ghost sm" on:click={showCached} disabled={busy}>Show last verified on-chain proof</button>
             </div>
-            <div class="amt2">Amount <b>{rev.amount} {rev.asset}</b></div>
-            <button class="ghost sm" on:click={toggleRegulator}>seal again</button>
-            <p class="note">The public ledger (left) stays redacted forever — the chain itself never stores this data, only its commitment. This panel is a client-side simulation of the reconstruction a real key-holder would do (see SECURITY.md: this demo build, unlike the on-chain commitment, does not gate the secret behind real access control).</p>
+            <p class="failnote">Retry keeps your <b>{amount.toLocaleString()} USDC</b>. Nothing is faked — the alternative shows a real transfer previously anchored on-chain (tx {short(TX.submit, 6)}).</p>
+          </div>
+        {:else if stage !== 'anchored'}
+          <button class="btn primary block" disabled aria-busy="true"><span class="spin" aria-hidden="true"></span> {stageLabel[stage] ?? 'working…'}</button>
+        {:else}
+          <button class="btn ghost block" on:click={reset} disabled={busy}>↺ Run again</button>
+        {/if}
+        {#if error}<p class="err" role="alert">{error}</p>{/if}
+      </div>
+
+      {#if stage === 'anchored' && result}
+        {#if cached}
+          <div class="cachedbanner" role="status">
+            <b>Cached</b> — a real transfer previously anchored on-chain (tx
+            <a href={`${EXPLORER}/tx/${TX.submit}`} target="_blank" rel="noreferrer">{short(TX.submit, 8)} ↗</a>), not
+            this session's live run. Every panel below reflects that transaction.
           </div>
         {/if}
-      </div>
-    </section>
 
-    {#if log.length > 1}
-      <section class="logsec">
-        <h3>Compliance log <span class="dim">— anchored this session</span></h3>
-        {#each log as e}
-          <a class="logrow mono" href={`${EXPLORER}/tx/${e.txHash}`} target="_blank" rel="noreferrer">
-            <span class="ok">✓</span> {short(e.txHash, 8)} <span class="dim">bracket {e.bracket}{e.live ? '' : ' · cached'}</span> ↗
-          </a>
-        {/each}
-      </section>
-    {/if}
-  {/if}
+        <div class="ledgers">
+          <!-- LEFT: the public ledger, a redacted institutional filing -->
+          <article class="ledger public">
+            <div class="lh">
+              <span class="lh-t">What the chain sees</span>
+              {#if live}<span class="tag ok">verified on-chain</span>{:else}<span class="tag warn">previously anchored</span>{/if}
+            </div>
+            <div class="verdict"><span class="vstamp" aria-hidden="true">✓</span> Travel-Rule compliant</div>
+            <dl class="filing">
+              <div><dt>Originator</dt><dd class="redact" aria-label="redacted">████████████</dd></div>
+              <div><dt>Beneficiary</dt><dd class="redact" aria-label="redacted">█████████</dd></div>
+              <div><dt>Amount</dt><dd class="redact" aria-label="redacted">██████</dd></div>
+              <div><dt>Bracket</dt><dd>{result.bracket === 1 ? 'full IVMS101' : 'reduced'}</dd></div>
+              <div><dt>Commitment</dt><dd class="mono sm">{short(result.attCommitment, 8)}</dd></div>
+              <div><dt>Settlement</dt><dd class="mono sm">{short(result.settlementRef, 8)}</dd></div>
+            </dl>
+            <div class="txrow">
+              {#if cached || txIndexed}
+                <a href={`${EXPLORER}/tx/${result.txHash}`} target="_blank" rel="noreferrer" class="mono txlink">{short(result.txHash, 8)} ↗</a>
+              {:else}
+                <span class="mono indexing" role="status">{short(result.txHash, 8)} · indexing…</span>
+              {/if}
+              {#if live}<span class="age" role="status">confirmed {ageSec}s ago</span>{/if}
+            </div>
+            {#if result.paymentTx && (cached || txIndexed)}
+              <div class="settlebind">
+                <span class="sbl">One settlement on Stellar</span>
+                <a href={`${EXPLORER}/tx/${result.paymentTx}`} target="_blank" rel="noreferrer" class="mono">payment {short(result.paymentTx, 6)} ↗</a>
+                <span class="sarrow" aria-hidden="true">↦</span>
+                <a href={`${EXPLORER}/tx/${result.txHash}`} target="_blank" rel="noreferrer" class="mono">compliance {short(result.txHash, 6)} ↗</a>
+                <span class="sbl2">both bound to settlement {short(result.settlementRef, 6)}</span>
+              </div>
+            {/if}
+            <div class="acts">
+              <button class="btn tiny" on:click={doReadLive} disabled={busy}>read live from chain</button>
+              {#if DEMO_MODE}<button class="btn tiny danger" on:click={doTamper} disabled={busy}>try to forge it</button>{/if}
+            </div>
+            {#if liveRead}
+              <p class="readout mono">{liveRead.error ? 'read error' : liveRead.missing ? 'not found' : `chain → bracket=${liveRead.bracket}, submitter=${short(liveRead.submitter, 4)}, ledger=${liveRead.ledger}`}</p>
+            {/if}
+            {#if tamper}
+              {#if tamper.rejected}
+                <div class="stamp" role="status"><span class="stamp-l">rejected on-chain</span><span class="stamp-c mono">{tamper.reason}</span></div>
+              {:else if tamper.running}
+                <p class="readout">submitting a tampered proof…</p>
+              {:else if tamper.localError}
+                <p class="readout">couldn't reach contract: {tamper.localError}</p>
+              {:else}
+                <p class="readout">unexpectedly accepted</p>
+              {/if}
+            {/if}
+          </article>
+
+          <!-- RIGHT: the regulator vault, the single dark surface -->
+          <article class="ledger vault" class:open={regulator}>
+            <div class="lh">
+              <span class="lh-t">The full truth</span>
+              <span class="tag {regulator ? 'keyed' : 'sealed'}">{regulator ? 'view-key applied' : 'sealed'}</span>
+            </div>
+            {#if !regulator}
+              <div class="sealface">
+                <span class="wax" aria-hidden="true"><span class="wax-v">V</span></span>
+                <p>Encrypted to the regulator's view key. The chain holds only a commitment — no identity, no amount, no way in without the key.</p>
+                <button class="btn key" on:click={toggleRegulator} disabled={busy}>{busy ? 'opening…' : 'Apply regulator view-key'}</button>
+              </div>
+            {:else if rev}
+              <div class="truth">
+                <div class="attest"><span class="ok" aria-hidden="true">✓</span> opened with the regulator view-key</div>
+                {#if rev.commitmentMatch === true}
+                  <div class="attest"><span class="ok" aria-hidden="true">✓</span> recomputed commitment matches the value anchored on-chain</div>
+                {:else if rev.commitmentMatch === false}
+                  <div class="attest bad"><span aria-hidden="true">✗</span> recomputed commitment does <b>not</b> match the anchored value</div>
+                {/if}
+                <div class="cols">
+                  <div class="rec">
+                    <h4>Originator</h4>
+                    <b>{rev.oName}</b>
+                    <span>{rev.oAddr}</span>
+                    <span class="dim">DOB {rev.oDob}</span>
+                    <span class="dim mono">{rev.oVasp?.name} · {rev.oVasp?.lei}</span>
+                  </div>
+                  <div class="rec">
+                    <h4>Beneficiary</h4>
+                    <b>{rev.bName}</b>
+                    <span>{rev.bAddr}</span>
+                    <span class="dim mono">{rev.bVasp?.name} · {rev.bVasp?.lei}</span>
+                  </div>
+                </div>
+                <div class="amt2">Amount <b>{rev.amount} {rev.asset}</b></div>
+                <button class="btn tiny ghostv" on:click={toggleRegulator}>seal again</button>
+                <p class="note">The public ledger stays redacted forever; the chain never stores this data, only its commitment. This panel is a client-side simulation of the reconstruction a real key-holder would perform (see SECURITY.md).</p>
+              </div>
+            {/if}
+          </article>
+        </div>
+
+        {#if log.length > 1}
+          <div class="logsec">
+            <h3>Compliance log <span class="dim">— anchored this session</span></h3>
+            <div class="logrows">
+              {#each log as e}
+                <a class="logrow mono" href={`${EXPLORER}/tx/${e.txHash}`} target="_blank" rel="noreferrer">
+                  <span class="ok" aria-hidden="true">✓</span> {short(e.txHash, 8)} <span class="dim">bracket {e.bracket}{e.live ? '' : ' · cached'}</span> ↗
+                </a>
+              {/each}
+            </div>
+          </div>
+        {/if}
+      {/if}
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section class="band alt reveal" use:reveal>
+    <div class="wrap">
+      <div class="section-head"><span class="idx">02</span><h2>How it works</h2></div>
+      <ol class="steps">
+        <li>
+          <span class="stepn">i</span>
+          <h3>Prove, where the data lives</h3>
+          <p>VASP A generates the proof <em>inside its own systems</em> over the real IVMS101 payload and the hidden amount. The customer's identity never leaves the exchange.</p>
+        </li>
+        <li>
+          <span class="stepn">ii</span>
+          <h3>Verify, inside the contract</h3>
+          <p>A Soroban contract runs the BLS12-381 pairing check on-chain, binds the licensed-VASP registry, the FATF threshold and the settlement, and stores a regulator-openable commitment. No PII touches the chain.</p>
+        </li>
+        <li>
+          <span class="stepn">iii</span>
+          <h3>Anyone verifies, only the regulator opens</h3>
+          <p>The public reads a verified seal on stellar.expert. A regulator holding the view key reconstructs the full attestation and checks it against the on-chain commitment.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- INTEGRATE -->
+  <section class="band reveal" use:reveal>
+    <div class="wrap">
+      <div class="section-head"><span class="idx">03</span><h2>Integrate in about ten lines</h2></div>
+      <p class="section-lede">Veritas is infrastructure, not an app. An exchange wires the SDK into its backend; proving runs client-side, so Veritas never custodies a byte of PII. The demo above runs this exact flow in the browser.</p>
+      <figure class="code">
+        <figcaption><span class="fname mono">vasp-a/anchor-compliance.ts</span><button class="copy" on:click={copyCode}>{copied ? 'copied' : 'copy'}</button></figcaption>
+        <pre class="mono"><code>{INTEGRATE}</code></pre>
+      </figure>
+    </div>
+  </section>
+
+  <!-- VERIFY / TRUST -->
+  <section class="band alt reveal" use:reveal>
+    <div class="wrap">
+      <div class="section-head"><span class="idx">04</span><h2>Verify it yourself</h2></div>
+      <p class="section-lede">Nothing here asks for trust. Every artifact is on Stellar testnet and independently checkable.</p>
+      <ul class="verify-list">
+        <li>
+          <span class="vl-what">Veritas contract</span>
+          <span class="vl-desc">verifies the proof, anchors the compliance receipt</span>
+          <a class="mono" href={`${EXPLORER}/contract/${VERITAS_CONTRACT}`} target="_blank" rel="noreferrer">{short(VERITAS_CONTRACT, 6)} ↗</a>
+        </li>
+        <li>
+          <span class="vl-what">submit_compliance</span>
+          <span class="vl-desc">real proof verified, attestation anchored, event emitted</span>
+          <a class="mono" href={`${EXPLORER}/tx/${TX.submit}`} target="_blank" rel="noreferrer">{short(TX.submit, 6)} ↗</a>
+        </li>
+        <li>
+          <span class="vl-what">Groth16 verifier</span>
+          <span class="vl-desc">the BLS12-381 pairing check, ~41M of the 100M CPU budget</span>
+          <a class="mono" href={`${EXPLORER}/contract/${GROTH16_VERIFIER}`} target="_blank" rel="noreferrer">{short(GROTH16_VERIFIER, 6)} ↗</a>
+        </li>
+      </ul>
+      <p class="honest">
+        <b>Real:</b> the circuit, the proof, its on-chain verification, and every artifact linked above.
+        <b>Simulated:</b> the participating VASPs and the customer identities (synthetic IVMS101) — you
+        can't onboard a licensed exchange for a demo. The cryptography and the on-chain records are not
+        mocked. Full disclosure in SECURITY.md.
+      </p>
+    </div>
+  </section>
 
   <footer>
-    Real BLS12-381 Groth16 proof, generated in-browser and verified inside a Soroban contract on Stellar
-    testnet — Soroban's native BLS12-381 host functions make the on-chain pairing check cost ~41M of the
-    100M CPU budget. Each run sends a real settlement payment and anchors a fresh compliance tx; the VASPs
-    and IVMS101 data are simulated (see SECURITY.md).
+    <div class="wrap">
+      <span class="brand"><span class="brandmark" aria-hidden="true"></span> Veritas</span>
+      <p>
+        Real BLS12-381 Groth16 proof, generated in-browser and verified inside a Soroban contract on
+        Stellar testnet. Soroban's native BLS12-381 host functions make the on-chain pairing check cost
+        ~41M of the 100M CPU budget. Each run sends a real settlement payment and anchors a fresh
+        compliance transaction.
+      </p>
+    </div>
   </footer>
 </main>
 
 <style>
-  :global(body){margin:0;background:#0b0d12;color:#e9ecf2;font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;font-feature-settings:'tnum'}
-  .mono{font-family:ui-monospace,'SF Mono',Menlo,monospace}
-  .bar{display:flex;align-items:center;gap:.5rem;padding:.5rem 1rem;background:#0e1117;border-bottom:1px solid #1b2230;font-size:.74rem;color:#8a93a6}
-  .dot{width:7px;height:7px;border-radius:50%;background:#3ddc97;box-shadow:0 0 8px #3ddc97;transition:background .3s}
-  .dot.amber{background:#d8a657;box-shadow:0 0 8px #d8a657}
-  .dot.down{background:#f0655a;box-shadow:0 0 8px #f0655a}
-  .bar .sep{color:#39414f}
-  .barlink{margin-left:auto;color:#6ea8fe;text-decoration:none}
-  main{max-width:1080px;margin:0 auto;padding:2rem 1.25rem 4rem}
-  header h1{font-size:1.9rem;letter-spacing:-.02em;margin:0;font-weight:800}
-  .tag{color:#8a93a6;margin:.3rem 0 0;max-width:60ch}
-  section{margin-top:1.25rem}
-  .compose{background:#11151e;border:1px solid #1d2533;border-radius:14px;padding:1.2rem 1.4rem}
-  .parties{display:flex;align-items:center;gap:1rem}
-  .parties > div{flex:1;display:flex;flex-direction:column;gap:.12rem}
-  .parties label{font-size:.66rem;color:#6c7585;text-transform:uppercase;letter-spacing:.05em}
-  .parties b{font-size:1rem}
-  .parties span{font-size:.78rem;color:#8a93a6}
-  .ar{flex:0;color:#6ea8fe;font-size:1.3rem}
-  .sim{background:#241a08;color:#d8a657;border:1px dashed #6b521f;border-radius:4px;padding:0 .3rem;font-size:.6rem;letter-spacing:.04em}
-  .slider{margin-top:1.1rem}
-  .slider label{font-size:.72rem;color:#8a93a6}
-  .slider input{width:100%;margin:.5rem 0 .3rem;accent-color:#7c5cff}
-  .amtrow{display:flex;justify-content:space-between;align-items:baseline}
-  .amt{font-size:1.15rem;font-weight:700}
-  .bracket{font-size:.74rem;color:#8a93a6}
-  .bracket.full{color:#3ddc97}
-  .wallet{display:flex;align-items:center;gap:.5rem;margin-top:1rem;font-size:.74rem;color:#8a93a6}
-  .seg{background:#161c28;color:#8a93a6;border:1px solid #232c3c;padding:.3rem .7rem;font-size:.74rem;font-weight:500}
-  .seg.on{background:#1c2740;color:#cdd6e4;border-color:#3a4a6e}
-  button{cursor:pointer;border:0;border-radius:10px;font-weight:600;transition:filter .15s}
-  button:disabled{opacity:.55;cursor:default}
-  button:hover:not(:disabled){filter:brightness(1.1)}
-  .primary{width:100%;margin-top:1.1rem;background:#7c5cff;color:#fff;padding:.78rem;font-size:.95rem}
-  .primary.sm{width:auto;margin:.3rem 0 0;padding:.5rem .9rem;font-size:.84rem}
-  .ghost{background:#1a2230;color:#cfd6e4;padding:.45rem .85rem;font-size:.8rem}
-  .ghost.sm{padding:.35rem .7rem}
-  .ghost.danger{color:#f0a59b}
-  .spin{display:inline-block;animation:spin 1s linear infinite}
-  @keyframes spin{to{transform:rotate(360deg)}}
-  .err{color:#f0a59b;font-size:.82rem;margin:.6rem 0 0}
-  .failcard{margin-top:1.1rem;background:#1a1206;border:1px solid #5a4818;border-radius:12px;padding:.9rem 1.1rem}
-  .failmsg{color:#e7c07a;font-size:.86rem;font-weight:600}
-  .failacts{display:flex;gap:.6rem;margin-top:.7rem;flex-wrap:wrap}
-  .failnote{color:#9a8a6a;font-size:.74rem;margin:.7rem 0 0;max-width:60ch}
-  .cachedbanner{margin-top:1rem;background:#2a2207;border:1px solid #5a4818;border-radius:10px;padding:.6rem .9rem;color:#e7c07a;font-size:.8rem;font-weight:600}
-  .cachedbanner a{color:#f0cd86;text-decoration:underline}
-  .ledgers{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
-  .pane{border-radius:14px;padding:1.1rem 1.3rem;min-height:300px}
-  .ph{display:flex;justify-content:space-between;align-items:center;font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;margin-bottom:.9rem}
-  .badge{font-size:.6rem;padding:.12rem .4rem;border-radius:4px;letter-spacing:.04em}
-  .badge.real{background:#06321f;color:#3ddc97;border:1px solid #14512f}
-  .badge.cached{background:#2a2207;color:#d8a657;border:1px solid #5a4818}
-  .badge.lock{background:#1b1f2a;color:#8a93a6;border:1px solid #2a3242}
-  /* LEFT public = light institutional document */
-  .public{background:#f4f1ea;color:#1c2128;border:1px solid #d9d2c4}
-  .public .ph{color:#7a7464}
-  .verdict{font-size:1.3rem;font-weight:800;color:#1a7f4b;margin-bottom:.8rem}
-  .public dl{margin:0;display:grid;gap:.4rem}
-  .public dl > div{display:flex;justify-content:space-between;border-bottom:1px solid #e4ddcf;padding-bottom:.35rem}
-  .public dt{font-size:.74rem;color:#6b6555;text-transform:uppercase;letter-spacing:.04em}
-  .public dd{margin:0;font-size:.86rem;font-weight:600}
-  .public dd.sm{font-size:.76rem;font-weight:500}
-  .redact{background:#1c2128;color:#1c2128;border-radius:3px;letter-spacing:-1px;user-select:none}
-  .tx{margin-top:.9rem;display:flex;align-items:center;gap:.7rem;flex-wrap:wrap}
-  .public .tx a{color:#2d6cdf;text-decoration:none;font-size:.8rem}
-  .indexing{font-size:.8rem;color:#8a7f66;opacity:.85}
-  .age{font-size:.72rem;color:#1a7f4b;font-variant-numeric:tabular-nums}
-  .settlebind{margin-top:.7rem;display:flex;flex-wrap:wrap;align-items:center;gap:.4rem;font-size:.74rem;padding-top:.6rem;border-top:1px dashed #d9d2c4}
-  .settlebind a{text-decoration:none}
-  .public .settlebind a{color:#2d6cdf}
-  .sbl{color:#6b6555;text-transform:uppercase;letter-spacing:.04em;font-size:.62rem;font-weight:700}
-  .sarrow{color:#8a7f66}
-  .sbl2{flex-basis:100%;color:#7a7464;font-size:.7rem}
-  .acts{display:flex;gap:.5rem;margin-top:.8rem}
-  .public .ghost{background:#e7e0d2;color:#3a3a3a}
-  .public .ghost.danger{color:#b4452f}
-  .readout{margin:.7rem 0 0;font-size:.76rem;color:#5a5546}
-  .readout.bad{color:#b4452f;font-weight:600}
-  /* RIGHT private = dark vault */
-  .private{background:#0f1320;border:1px solid #1e2740;transition:box-shadow .4s}
-  .private.open{box-shadow:0 0 0 1px #3b2d63,0 0 40px -12px #7c5cff}
-  .vault{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:.7rem;height:240px;color:#8a93a6}
-  .vault .lock{font-size:2.4rem;color:#4b3f7a}
-  .vault p{font-size:.82rem;max-width:34ch;margin:0}
-  .truth{animation:fade .4s ease}
-  @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1}}
-  .match{font-size:.78rem;color:#c4b5fd;margin-bottom:.8rem}
-  .ok{color:#3ddc97}
-  .warn{color:#f0a59b}
-  .cols{display:grid;grid-template-columns:1fr 1fr;gap:.8rem}
-  .cols > div{display:flex;flex-direction:column;gap:.2rem;background:#0b0e18;border-radius:9px;padding:.7rem .8rem}
-  .cols h4{margin:0 0 .25rem;font-size:.64rem;color:#a78bfa;text-transform:uppercase;letter-spacing:.06em}
-  .cols b{font-size:1rem}
-  .cols span{font-size:.78rem;color:#c2cad7}
-  .dim{color:#7c8699}
-  .amt2{margin-top:.8rem;font-size:.95rem}
-  .note{font-size:.74rem;color:#8a93a6;margin:.8rem 0 0;max-width:52ch}
-  .logsec h3{font-size:.78rem;color:#8a93a6;font-weight:600}
-  .logrow{display:block;color:#aeb7c8;text-decoration:none;font-size:.78rem;padding:.35rem 0;border-bottom:1px solid #161c28}
-  footer{margin-top:2rem;text-align:center;color:#5c6577;font-size:.74rem;line-height:1.6;max-width:70ch;margin-left:auto;margin-right:auto}
-  @media(max-width:760px){.ledgers{grid-template-columns:1fr}.cols{grid-template-columns:1fr}}
+  :root {
+    /* paper — warm parchment neutrals */
+    --paper: oklch(96.2% 0.011 84);
+    --paper-raised: oklch(98.4% 0.008 84);
+    --paper-sunk: oklch(93.2% 0.014 82);
+    --rule: oklch(86% 0.017 80);
+    --rule-soft: oklch(90.5% 0.013 82);
+    /* ink — cool blue-black */
+    --ink: oklch(24% 0.028 262);
+    --ink-body: oklch(33% 0.026 262);
+    --ink-muted: oklch(49% 0.021 262);
+    --ink-faint: oklch(58% 0.017 262);
+    /* accents */
+    --blue: oklch(47% 0.135 258);
+    --blue-strong: oklch(41% 0.145 258);
+    --seal: oklch(45% 0.15 27);
+    --seal-strong: oklch(39% 0.155 27);
+    --verify: oklch(45% 0.11 152);
+    --brass: oklch(66% 0.11 76);
+    /* vault — the single dark surface */
+    --vault: oklch(23% 0.024 264);
+    --vault-raised: oklch(27.5% 0.028 264);
+    --vault-rule: oklch(37% 0.03 264);
+    --vault-ink: oklch(92% 0.011 84);
+    --vault-muted: oklch(70% 0.016 262);
+    --vault-blue: oklch(76% 0.085 250);
+    /* type + motion */
+    --sans: 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+    --e-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --e-quart: cubic-bezier(0.25, 1, 0.5, 1);
+    --edge: min(6vw, 5rem);
+  }
+
+  :global(body) {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink-body);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: 'tnum' 1, 'ss01' 1;
+  }
+  :global(*, *::before, *::after) { box-sizing: border-box; }
+  .mono { font-family: var(--mono); font-feature-settings: 'tnum' 1; }
+  h1, h2, h3, h4 { color: var(--ink); text-wrap: balance; margin: 0; }
+  a { color: var(--blue); }
+
+  .wrap { max-width: 1120px; margin: 0 auto; padding-inline: var(--edge); }
+
+  /* ---- top bar ---- */
+  .topbar { border-bottom: 1px solid var(--rule); background: color-mix(in oklab, var(--paper) 82%, transparent); backdrop-filter: saturate(1.1); position: sticky; top: 0; z-index: 20; }
+  .barwrap { display: flex; align-items: center; gap: 0.75rem; height: 46px; font-size: 0.78rem; color: var(--ink-muted); }
+  .brand { display: inline-flex; align-items: center; gap: 0.5rem; font-weight: 600; color: var(--ink); letter-spacing: -0.01em; }
+  .brandmark { width: 12px; height: 12px; border-radius: 3px; background: linear-gradient(135deg, var(--blue), var(--seal)); box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--paper) 70%, transparent); }
+  .net { display: inline-flex; align-items: center; gap: 0.4rem; margin-left: 0.5rem; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--verify); box-shadow: 0 0 0 3px color-mix(in oklab, var(--verify) 20%, transparent); transition: background 0.3s; }
+  .dot.amber { background: var(--brass); box-shadow: 0 0 0 3px color-mix(in oklab, var(--brass) 20%, transparent); }
+  .dot.down { background: var(--seal); box-shadow: 0 0 0 3px color-mix(in oklab, var(--seal) 20%, transparent); }
+  .barwrap .sep { color: var(--rule); }
+  .contractid { color: var(--ink-muted); }
+  .verify-top { margin-left: auto; text-decoration: none; font-weight: 500; }
+  .verify-top:hover { text-decoration: underline; }
+
+  /* ---- hero ---- */
+  .hero { padding: clamp(3.5rem, 8vw, 7rem) 0 clamp(2.5rem, 5vw, 4rem); border-bottom: 1px solid var(--rule); position: relative; }
+  .hero::after { content: ''; position: absolute; inset: 0; pointer-events: none; background-image: repeating-linear-gradient(-38deg, color-mix(in oklab, var(--ink) 5%, transparent) 0 1px, transparent 1px 9px), repeating-linear-gradient(38deg, color-mix(in oklab, var(--ink) 4%, transparent) 0 1px, transparent 1px 9px); mask-image: radial-gradient(130% 90% at 92% 0%, #000, transparent 58%); opacity: 0.7; }
+  .eyebrow { font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.16em; color: var(--seal); font-weight: 600; margin: 0 0 1.1rem; }
+  .hero h1 { font-size: clamp(2.3rem, 1.2rem + 4.4vw, 4rem); font-weight: 600; letter-spacing: -0.03em; line-height: 1.02; }
+  .lede { font-size: clamp(1.05rem, 0.98rem + 0.5vw, 1.28rem); color: var(--ink-body); max-width: 60ch; margin: 1.4rem 0 0; line-height: 1.55; text-wrap: pretty; }
+  .hero-cta { display: flex; flex-wrap: wrap; gap: 0.7rem; margin-top: 2rem; }
+  .figure { max-width: 62ch; margin: clamp(2.5rem, 5vw, 3.5rem) 0 0; padding-left: 1.3rem; border-left: 2px solid var(--seal); display: grid; grid-template-columns: auto 1fr; gap: 0 1.2rem; align-items: baseline; }
+  .figure-n { font-size: clamp(1.8rem, 1.2rem + 2vw, 2.6rem); font-weight: 600; color: var(--ink); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .figure p { margin: 0; font-size: 0.95rem; color: var(--ink-muted); }
+
+  /* ---- buttons ---- */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 0.45rem; font-family: inherit; font-size: 0.92rem; font-weight: 500; padding: 0.7rem 1.15rem; border-radius: 8px; border: 1px solid transparent; cursor: pointer; text-decoration: none; transition: background 0.18s var(--e-quart), border-color 0.18s, color 0.18s, transform 0.06s; }
+  .btn:active:not(:disabled) { transform: translateY(1px); }
+  .btn.primary { background: var(--ink); color: var(--paper-raised); }
+  .btn.primary:hover:not(:disabled) { background: var(--blue-strong); }
+  .btn.ghost { background: transparent; color: var(--ink); border-color: var(--rule); }
+  .btn.ghost:hover:not(:disabled) { border-color: var(--ink-muted); background: var(--paper-sunk); }
+  .btn.block { width: 100%; margin-top: 1.2rem; padding-block: 0.85rem; font-size: 0.95rem; }
+  .btn.sm { padding: 0.5rem 0.85rem; font-size: 0.85rem; }
+  .btn.tiny { padding: 0.4rem 0.7rem; font-size: 0.8rem; background: var(--paper-sunk); color: var(--ink-body); border-color: var(--rule); border-radius: 7px; }
+  .btn.tiny:hover:not(:disabled) { border-color: var(--ink-faint); }
+  .btn.tiny.danger { color: var(--seal); }
+  .btn:disabled { opacity: 0.55; cursor: default; }
+  :global(a.btn) { color: var(--paper-raised); }
+  :global(a.btn.ghost) { color: var(--ink); }
+
+  .spin { width: 13px; height: 13px; border-radius: 50%; border: 2px solid color-mix(in oklab, var(--paper) 45%, transparent); border-top-color: var(--paper-raised); animation: spin 0.7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ---- bands / section heads ---- */
+  .band { padding: clamp(3rem, 6vw, 5.5rem) 0; border-bottom: 1px solid var(--rule); }
+  .band.alt { background: color-mix(in oklab, var(--paper-sunk) 60%, var(--paper)); }
+  .section-head { display: flex; align-items: baseline; gap: 0.9rem; margin-bottom: 1.8rem; }
+  .idx { font-family: var(--mono); font-size: 0.8rem; color: var(--seal); font-weight: 500; padding-top: 0.15rem; }
+  .section-head h2 { font-size: clamp(1.4rem, 1.1rem + 1vw, 1.85rem); font-weight: 600; letter-spacing: -0.02em; }
+  .section-lede { max-width: 64ch; color: var(--ink-muted); margin: -0.8rem 0 1.6rem; }
+
+  /* ---- compose card ---- */
+  .compose { background: var(--paper-raised); border: 1px solid var(--rule); border-radius: 14px; padding: clamp(1.2rem, 3vw, 1.8rem); box-shadow: 0 1px 0 color-mix(in oklab, var(--ink) 6%, transparent), 0 18px 40px -30px color-mix(in oklab, var(--ink) 40%, transparent); }
+  .parties { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 0.5rem 1rem; }
+  .party { display: flex; flex-direction: column; gap: 0.12rem; }
+  .plabel { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-faint); }
+  .party b { font-size: 1.02rem; color: var(--ink); }
+  .juris { font-size: 0.8rem; color: var(--ink-muted); }
+  .flow { color: var(--blue); font-size: 1.2rem; }
+  .sim { font-size: 0.58rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--seal); border: 1px solid color-mix(in oklab, var(--seal) 35%, var(--rule)); border-radius: 4px; padding: 0.05rem 0.3rem; vertical-align: middle; }
+  .slider { margin-top: 1.5rem; }
+  .slider label { font-size: 0.82rem; color: var(--ink-body); font-weight: 500; }
+  .slider .hint { color: var(--ink-faint); font-weight: 400; }
+  .slider input { width: 100%; margin: 0.7rem 0 0.4rem; accent-color: var(--blue); height: 4px; }
+  .amtrow { display: flex; justify-content: space-between; align-items: baseline; }
+  .amt { font-size: 1.35rem; font-weight: 500; color: var(--ink); letter-spacing: -0.01em; }
+  .ccy { font-size: 0.9rem; color: var(--ink-muted); }
+  .bracket { font-size: 0.76rem; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+  .bracket.full { color: var(--verify); }
+  .wallet { display: flex; align-items: center; flex-wrap: wrap; gap: 0.45rem; margin-top: 1.3rem; font-size: 0.8rem; }
+  .wl { color: var(--ink-faint); }
+  .seg { font-family: inherit; background: var(--paper-sunk); color: var(--ink-muted); border: 1px solid var(--rule); padding: 0.32rem 0.7rem; font-size: 0.78rem; border-radius: 7px; cursor: pointer; }
+  .seg.on { background: color-mix(in oklab, var(--blue) 12%, var(--paper-raised)); color: var(--blue-strong); border-color: color-mix(in oklab, var(--blue) 40%, var(--rule)); }
+  .err { color: var(--seal); font-size: 0.84rem; margin: 0.7rem 0 0; }
+
+  .failcard { margin-top: 1.2rem; border: 1px solid color-mix(in oklab, var(--seal) 30%, var(--rule)); background: color-mix(in oklab, var(--seal) 6%, var(--paper-raised)); border-radius: 12px; padding: 1rem 1.15rem; }
+  .failmsg { color: var(--seal-strong); font-weight: 500; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem; }
+  .fx { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--seal); color: var(--paper-raised); font-size: 0.72rem; font-weight: 700; }
+  .failacts { display: flex; gap: 0.6rem; margin-top: 0.85rem; flex-wrap: wrap; }
+  .failnote { color: var(--ink-muted); font-size: 0.8rem; margin: 0.8rem 0 0; max-width: 62ch; }
+  .cachedbanner { margin-top: 1.3rem; border: 1px solid color-mix(in oklab, var(--brass) 40%, var(--rule)); background: color-mix(in oklab, var(--brass) 12%, var(--paper-raised)); border-radius: 10px; padding: 0.7rem 1rem; font-size: 0.82rem; color: color-mix(in oklab, var(--brass) 55%, var(--ink)); }
+  .cachedbanner b { color: var(--ink); }
+
+  /* ---- two ledgers ---- */
+  .ledgers { margin-top: 1.3rem; display: grid; grid-template-columns: 1fr 1fr; gap: 1.1rem; }
+  .ledger { border-radius: 14px; padding: clamp(1.1rem, 2.5vw, 1.5rem); min-height: 330px; }
+  .lh { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.1rem; }
+  .lh-t { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.12em; }
+  .tag { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.08em; padding: 0.16rem 0.44rem; border-radius: 4px; font-weight: 600; }
+  .tag.ok { color: var(--verify); border: 1px solid color-mix(in oklab, var(--verify) 40%, transparent); background: color-mix(in oklab, var(--verify) 10%, transparent); }
+  .tag.warn { color: var(--brass); border: 1px solid color-mix(in oklab, var(--brass) 45%, transparent); background: color-mix(in oklab, var(--brass) 10%, transparent); }
+  .tag.sealed { color: var(--vault-muted); border: 1px solid var(--vault-rule); }
+  .tag.keyed { color: var(--brass); border: 1px solid color-mix(in oklab, var(--brass) 50%, transparent); background: color-mix(in oklab, var(--brass) 14%, transparent); }
+
+  /* public = a light institutional filing on document stock */
+  .public { background: var(--paper-raised); border: 1px solid var(--rule); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--paper) 60%, transparent), 0 20px 44px -34px color-mix(in oklab, var(--ink) 45%, transparent); }
+  .public .lh-t { color: var(--ink-faint); }
+  .verdict { display: flex; align-items: center; gap: 0.6rem; font-size: 1.25rem; font-weight: 600; color: var(--verify); letter-spacing: -0.01em; margin-bottom: 1.1rem; padding-bottom: 1.1rem; border-bottom: 1px solid var(--rule-soft); }
+  .vstamp { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; border: 1.5px solid var(--verify); color: var(--verify); font-size: 0.9rem; }
+  .filing { margin: 0; display: grid; gap: 0; }
+  .filing > div { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 0.42rem 0; border-bottom: 1px solid var(--rule-soft); }
+  .filing dt { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-faint); margin: 0; }
+  .filing dd { margin: 0; font-size: 0.88rem; font-weight: 500; color: var(--ink); }
+  .filing dd.sm { font-size: 0.78rem; font-weight: 400; color: var(--ink-muted); }
+  .redact { background: var(--ink); color: var(--ink); border-radius: 2px; letter-spacing: -1px; user-select: none; font-size: 0.8rem; padding: 0 0.15rem; }
+  .txrow { margin-top: 1rem; display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+  .txlink { text-decoration: none; font-size: 0.82rem; color: var(--blue); }
+  .txlink:hover { text-decoration: underline; }
+  .indexing { font-size: 0.82rem; color: var(--ink-faint); }
+  .age { font-size: 0.74rem; color: var(--verify); font-variant-numeric: tabular-nums; }
+  .settlebind { margin-top: 0.9rem; padding-top: 0.8rem; border-top: 1px dashed var(--rule); display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; font-size: 0.76rem; }
+  .settlebind a { text-decoration: none; color: var(--blue); }
+  .settlebind a:hover { text-decoration: underline; }
+  .sbl { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-faint); font-weight: 600; }
+  .sarrow { color: var(--ink-muted); }
+  .sbl2 { flex-basis: 100%; color: var(--ink-faint); font-size: 0.72rem; }
+  .acts { display: flex; gap: 0.55rem; margin-top: 1rem; flex-wrap: wrap; }
+  .readout { margin: 0.85rem 0 0; font-size: 0.78rem; color: var(--ink-muted); }
+  .readout.mono { color: var(--ink-body); }
+
+  /* the forgery-rejection stamp */
+  .stamp { margin-top: 1rem; display: inline-flex; flex-direction: column; gap: 0.1rem; align-items: flex-start; border: 2px solid var(--seal); color: var(--seal-strong); border-radius: 8px; padding: 0.45rem 0.8rem; transform: rotate(-2.2deg); animation: stampin 0.32s var(--e-out) both; }
+  .stamp-l { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.14em; font-weight: 700; }
+  .stamp-c { font-size: 0.78rem; }
+  @keyframes stampin { from { opacity: 0; transform: rotate(-2.2deg) scale(1.14); } to { opacity: 1; transform: rotate(-2.2deg) scale(1); } }
+
+  /* vault = the single dark surface */
+  .vault { background: var(--vault); border: 1px solid var(--vault-rule); color: var(--vault-ink); position: relative; overflow: hidden; transition: box-shadow 0.5s var(--e-out), border-color 0.5s; }
+  .vault .lh-t { color: var(--vault-muted); }
+  .vault.open { border-color: color-mix(in oklab, var(--brass) 45%, var(--vault-rule)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--brass) 22%, transparent), 0 0 60px -22px color-mix(in oklab, var(--brass) 60%, transparent); }
+  .sealface { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 1rem; min-height: 250px; }
+  .wax { position: relative; display: inline-grid; place-items: center; width: 60px; height: 60px; border-radius: 50%; background: radial-gradient(circle at 38% 32%, var(--seal), var(--seal-strong)); box-shadow: 0 6px 16px -6px color-mix(in oklab, var(--seal) 70%, black), inset 0 0 0 2px color-mix(in oklab, black 22%, transparent); }
+  .wax::before { content: ''; position: absolute; inset: -5px; border-radius: 50%; border: 1.5px dashed color-mix(in oklab, var(--seal) 55%, var(--vault)); }
+  .wax-v { font-weight: 700; font-size: 1.5rem; color: color-mix(in oklab, var(--paper) 88%, var(--seal)); text-shadow: 0 1px 1px color-mix(in oklab, black 40%, transparent); }
+  .sealface p { font-size: 0.84rem; color: var(--vault-muted); max-width: 32ch; margin: 0; line-height: 1.5; }
+  .btn.key { background: var(--brass); color: oklch(24% 0.04 76); font-weight: 600; border: none; }
+  .btn.key:hover:not(:disabled) { background: color-mix(in oklab, var(--brass) 88%, white); }
+
+  .truth { animation: unseal 0.62s var(--e-out) both; }
+  @keyframes unseal { from { clip-path: inset(0 0 100% 0); opacity: 0.35; } to { clip-path: inset(0 0 0 0); opacity: 1; } }
+  .attest { display: flex; align-items: baseline; gap: 0.45rem; font-size: 0.8rem; color: var(--vault-blue); margin-bottom: 0.6rem; }
+  .attest.bad { color: color-mix(in oklab, var(--seal) 60%, var(--vault-ink)); }
+  .ok { color: var(--verify); }
+  .vault .ok { color: oklch(72% 0.14 152); }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; margin-top: 0.9rem; }
+  .rec { display: flex; flex-direction: column; gap: 0.22rem; background: var(--vault-raised); border: 1px solid var(--vault-rule); border-radius: 9px; padding: 0.75rem 0.85rem; }
+  .rec h4 { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.09em; color: var(--brass); font-weight: 600; }
+  .rec b { font-size: 1rem; color: var(--vault-ink); }
+  .rec span { font-size: 0.78rem; color: var(--vault-muted); }
+  .rec .dim { color: color-mix(in oklab, var(--vault-muted) 78%, var(--vault)); }
+  .rec .mono { font-size: 0.7rem; }
+  .amt2 { margin-top: 0.9rem; font-size: 0.95rem; color: var(--vault-muted); }
+  .amt2 b { color: var(--vault-ink); font-weight: 600; }
+  .btn.ghostv { margin-top: 0.9rem; background: transparent; color: var(--vault-muted); border: 1px solid var(--vault-rule); }
+  .btn.ghostv:hover:not(:disabled) { border-color: var(--brass); color: var(--vault-ink); }
+  .note { font-size: 0.74rem; color: color-mix(in oklab, var(--vault-muted) 82%, var(--vault)); margin: 0.9rem 0 0; max-width: 52ch; line-height: 1.5; }
+
+  .logsec { margin-top: 1.6rem; }
+  .logsec h3 { font-size: 0.78rem; color: var(--ink-muted); font-weight: 600; margin-bottom: 0.5rem; }
+  .dim { color: var(--ink-faint); }
+  .logrows { display: grid; gap: 0; }
+  .logrow { display: flex; align-items: center; gap: 0.5rem; color: var(--ink-body); text-decoration: none; font-size: 0.8rem; padding: 0.4rem 0; border-bottom: 1px solid var(--rule-soft); }
+  .logrow:hover { color: var(--blue); }
+
+  /* ---- how it works ---- */
+  .steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; counter-reset: none; }
+  .steps li { position: relative; padding-top: 1.4rem; border-top: 2px solid var(--ink); }
+  .stepn { font-family: var(--mono); font-size: 0.85rem; color: var(--seal); position: absolute; top: 0.9rem; }
+  .steps h3 { font-size: 1.05rem; font-weight: 600; margin: 0.5rem 0 0.5rem; }
+  .steps p { margin: 0; font-size: 0.9rem; color: var(--ink-muted); }
+  .steps em { color: var(--ink-body); font-style: italic; }
+
+  /* ---- integrate ---- */
+  .code { margin: 0; border: 1px solid var(--vault-rule); border-radius: 12px; overflow: hidden; background: var(--vault); box-shadow: 0 20px 50px -34px color-mix(in oklab, var(--ink) 60%, transparent); }
+  .code figcaption { display: flex; align-items: center; justify-content: space-between; padding: 0.55rem 0.9rem; border-bottom: 1px solid var(--vault-rule); background: var(--vault-raised); }
+  .fname { font-size: 0.76rem; color: var(--vault-muted); }
+  .copy { font-family: var(--mono); font-size: 0.72rem; color: var(--vault-blue); background: transparent; border: 1px solid var(--vault-rule); border-radius: 6px; padding: 0.2rem 0.6rem; cursor: pointer; }
+  .copy:hover { border-color: var(--vault-blue); }
+  .code pre { margin: 0; padding: 1.1rem 1.2rem; overflow-x: auto; font-size: 0.8rem; line-height: 1.7; color: var(--vault-ink); tab-size: 2; }
+  .code code { color: color-mix(in oklab, var(--vault-ink) 88%, var(--vault-blue)); }
+
+  /* ---- verify ---- */
+  .verify-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }
+  .verify-list li { display: grid; grid-template-columns: minmax(9rem, auto) 1fr auto; align-items: center; gap: 0.6rem 1.2rem; padding: 0.95rem 0; border-bottom: 1px solid var(--rule); }
+  .vl-what { font-weight: 600; color: var(--ink); font-size: 0.92rem; }
+  .vl-desc { color: var(--ink-muted); font-size: 0.85rem; }
+  .verify-list a { text-decoration: none; font-size: 0.82rem; white-space: nowrap; }
+  .verify-list a:hover { text-decoration: underline; }
+  .honest { margin: 1.5rem 0 0; font-size: 0.88rem; color: var(--ink-muted); max-width: 74ch; line-height: 1.6; }
+  .honest b { color: var(--ink); font-weight: 600; }
+
+  /* ---- footer ---- */
+  footer { padding: 2.5rem 0 3.5rem; }
+  footer .wrap { display: flex; flex-direction: column; gap: 0.8rem; }
+  footer p { margin: 0; font-size: 0.8rem; color: var(--ink-faint); max-width: 78ch; line-height: 1.6; }
+
+  /* ---- reveal-on-scroll (the action adds .is-in when the section enters view) ---- */
+  .reveal { opacity: 0; transform: translateY(14px); transition: opacity 0.7s var(--e-out), transform 0.7s var(--e-out); }
+  :global(.reveal.is-in) { opacity: 1 !important; transform: none !important; }
+
+  /* ---- responsive ---- */
+  @media (max-width: 860px) {
+    .ledgers { grid-template-columns: 1fr; }
+    .steps { grid-template-columns: 1fr; gap: 1.2rem; }
+  }
+  @media (max-width: 560px) {
+    .parties { grid-template-columns: 1fr; }
+    .flow { transform: rotate(90deg); justify-self: start; }
+    .cols { grid-template-columns: 1fr; }
+    .verify-list li { grid-template-columns: 1fr auto; }
+    .vl-desc { grid-column: 1 / -1; }
+    .contractid, .barwrap .sep { display: none; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .truth { animation: none; clip-path: none; }
+    .stamp { animation: none; }
+    .reveal { transition: opacity 0.2s ease; transform: none; }
+    .btn:active:not(:disabled) { transform: none; }
+  }
 </style>
