@@ -181,7 +181,7 @@
 <main>
   <header>
     <h1>Veritas</h1>
-    <p class="tag">Prove the Travel Rule was followed — without putting an identity on-chain. Every run is a real proof and a real transaction.</p>
+    <p class="tag">One zero-knowledge proof, verified inside a <b>Soroban</b> smart contract on <b>Stellar</b>, proves a cross-VASP stablecoin transfer followed the FATF Travel Rule — with <b>no customer identity on-chain</b>. Every run is a real proof and a real Stellar transaction.</p>
   </header>
 
   <!-- input -->
@@ -310,8 +310,10 @@
   {/if}
 
   <footer>
-    Real BLS12-381 Groth16 proof, generated in-browser and verified inside a Soroban contract on Stellar testnet.
-    Proof + transaction are live; the VASPs and IVMS101 data are simulated (see SECURITY.md).
+    Real BLS12-381 Groth16 proof, generated in-browser and verified inside a Soroban contract on Stellar
+    testnet — Soroban's native BLS12-381 host functions make the on-chain pairing check cost ~41M of the
+    100M CPU budget. Each run sends a real settlement payment and anchors a fresh compliance tx; the VASPs
+    and IVMS101 data are simulated (see SECURITY.md).
   </footer>
 </main>
 

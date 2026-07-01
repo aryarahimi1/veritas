@@ -39,7 +39,7 @@ The on-chain pairing check costs ~41M of the 100M CPU budget. The attestation re
 (`get_attestation`) contains **no personal data** — only `{bracket, att_commitment, settlement_ref,
 submitter}`.
 
-## Why ZK, and why on a blockchain
+## Why ZK, why on-chain, and why Stellar
 
 The PII already moves fine off-chain — what's missing is a **shared, forgery-proof compliance fact**
 bound to settlement that no party owns. That's the one thing a smart contract gives you that an
@@ -47,6 +47,13 @@ encrypted inbox can't. ZK is what makes it possible: it proves the *correct comp
 over private inputs* (the hidden amount, the registry membership, the IVMS commitment) and emits a
 public ✓ that a signature alone could only produce by **revealing** the very data the Travel Rule is
 trying to move privately.
+
+**Why Stellar specifically:** Soroban ships **native BLS12-381 host functions**, so the Groth16 pairing
+check runs *inside* the contract for ~41M of the 100M CPU budget — cheap enough to verify every
+compliance proof on-chain. That is what makes Veritas a Stellar project rather than a generic ZK demo:
+the settlement rail and the proof verifier are the same chain. Each demo run even sends a **real testnet
+settlement payment** and derives the proof's `settlementRef` from it, so the value movement and its
+compliance receipt share one settlement id on Stellar — verifiable on stellar.expert as two linked txs.
 
 ## What's real vs. simulated (honest disclosure)
 
