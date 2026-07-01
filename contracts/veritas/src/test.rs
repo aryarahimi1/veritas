@@ -475,3 +475,85 @@ fn rejects_real_proof_with_tampered_public_signal() {
     assert_eq!(res, Err(Ok(Error::ProofInvalid)));
     assert!(client.get_attestation(&settlement_ref_u256).is_none());
 }
+
+/// Replay guard: anchoring the same real proof + signals a second time must fail with
+/// `AlreadyAnchored` — the persistent-storage dedup on `settlement_ref` fires (before the pairing
+/// ever runs, per `lib.rs`'s fail-fast ordering), so a valid proof can never be anchored twice under
+/// the same settlement. Reuses the exact `accepts_real_groth16_proof` fixture: first submission
+/// succeeds, the byte-identical second one is rejected and the original attestation is untouched.
+#[test]
+fn replay_rejected_already_anchored() {
+    const BRACKET_BE: [u8; 32] = [
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x01,
+    ];
+    const REGISTRY_ROOT_BE: [u8; 32] = [
+        0x64, 0x1a, 0x7b, 0x24, 0xed, 0xfe, 0x06, 0x0c, 0x5e, 0x74, 0xb9, 0x5b, 0x5b, 0x94, 0x8e,
+        0x3c, 0x7e, 0x7b, 0xf6, 0x89, 0x37, 0x9c, 0x44, 0x9f, 0x34, 0x60, 0x3a, 0xf0, 0x89, 0x86,
+        0x2d, 0x6a,
+    ];
+    const ATT_COMMITMENT_BE: [u8; 32] = [
+        0x0b, 0xf4, 0xfe, 0x89, 0x27, 0x51, 0xc6, 0xfe, 0x51, 0xa6, 0x9a, 0x8b, 0x21, 0x4e, 0x80,
+        0x6d, 0x4c, 0x72, 0x38, 0xe1, 0x92, 0x3d, 0xd0, 0xb6, 0x62, 0xcb, 0xd0, 0x78, 0x58, 0x2f,
+        0x0e, 0x8f,
+    ];
+    const SETTLEMENT_REF_BE: [u8; 32] = [
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x73, 0x65,
+        0x74, 0x74, 0x6c, 0x65, 0x6d, 0x65, 0x6e, 0x74, 0x2d, 0x72, 0x65, 0x66, 0x2d, 0x30, 0x30,
+        0x30, 0x31,
+    ];
+    const THRESHOLD_BE: [u8; 32] = [
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x03, 0xe8,
+    ];
+
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let registry_root_u256 = U256::from_be_bytes(&env, &Bytes::from_array(&env, &REGISTRY_ROOT_BE));
+    let settlement_ref_u256 =
+        U256::from_be_bytes(&env, &Bytes::from_array(&env, &SETTLEMENT_REF_BE));
+
+    let admin = Address::generate(&env);
+    let id = env.register(
+        Veritas {},
+        (admin, registry_root_u256.clone(), real_vk(&env)),
+    );
+    let client = VeritasClient::new(&env, &id);
+
+    let submitter = Address::generate(&env);
+    let pub_signals = vec![
+        &env,
+        U256::from_be_bytes(&env, &Bytes::from_array(&env, &BRACKET_BE)),
+        registry_root_u256,
+        U256::from_be_bytes(&env, &Bytes::from_array(&env, &ATT_COMMITMENT_BE)),
+        settlement_ref_u256.clone(),
+        U256::from_be_bytes(&env, &Bytes::from_array(&env, &THRESHOLD_BE)),
+    ];
+
+    // First submission: the real proof anchors successfully.
+    let first = client.try_submit_compliance(
+        &submitter,
+        &real_proof(&env),
+        &pub_signals,
+        &settlement_ref_u256,
+    );
+    assert_eq!(first, Ok(Ok(())));
+
+    // Byte-identical replay: the settlement_ref dedup must reject it.
+    let second = client.try_submit_compliance(
+        &submitter,
+        &real_proof(&env),
+        &pub_signals,
+        &settlement_ref_u256,
+    );
+    assert_eq!(second, Err(Ok(Error::AlreadyAnchored)));
+
+    // The original attestation survives the replay attempt unchanged.
+    let att = client
+        .get_attestation(&settlement_ref_u256)
+        .expect("first attestation must still be stored after the rejected replay");
+    assert_eq!(att.submitter, submitter);
+}

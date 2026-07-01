@@ -41,6 +41,12 @@ The gap between "a sound demo of the mechanism" and "a production compliance sys
   attestation-squatting.
 - **Counterparty authority.** The circuit proves the leaves are in the registry, not that the prover
   controls them. *Production:* prove knowledge of the secret behind each leaf (A and B both sign).
+- **Poseidon constants were derived for a different field.** circomlib's Poseidon round constants were
+  generated for the BN254 scalar field and are reused here over BLS12-381's scalar field (they fit,
+  since BN254's r is smaller than BLS12-381's). This is common practice with circom's
+  `--prime bls12381`, but it is a nonstandard Poseidon instantiation whose round parameters were not
+  derived for the target field. *Production:* re-derive the round constants for the BLS12-381 scalar
+  field, or use an audited BLS12-381-native Poseidon instantiation.
 - **The registry, the VASPs, and the IVMS101 customer data are simulated.** The IVMS101 *format* is
   real; the participants are not.
 
@@ -59,8 +65,8 @@ Audited by independent code-review + security passes; the following are implemen
 - The submitting address is **recorded** in the attestation (provenance). The VK/registry are
   intentionally immutable post-deploy — no admin backdoor to forge proofs.
 - Real BLS12-381 Groth16 pairing check (not a stub); the BLS host functions validate point membership.
-- 10 unit tests cover every negative branch (malformed/canonicity/registry/settlement/threshold/auth) plus
-  real-proof accept/reject.
+- 11 unit tests cover every negative branch (malformed/canonicity/registry/settlement/threshold/auth
+  and replay/dedup — `AlreadyAnchored`) plus real-proof accept/reject.
 
 **Still deferred (HIGH-2, honest):** `require_auth(submitter)` proves *a* signer, not the originating
 VASP's identity — the submitter is not yet bound in-circuit, so a holder of a valid proof could anchor
@@ -80,7 +86,11 @@ after shipping. Two things not covered by the circuit/contract sections above:
   fact that `attCommitment` is a commitment-open rather than real decryption: this is about the *demo
   build* additionally shipping the plaintext secret and payload to every browser. *Production:* gate
   those values behind a real server-side check (or real verifiable encryption per the item above) so
-  "SEALED" is an actual state, not a component-state toggle.
+  "SEALED" is an actual state, not a component-state toggle. A concrete implication: because every
+  witness secret is public, anyone can generate a valid proof against the pinned registry root for
+  **any** `settlementRef` and anchor it first, so the legitimate submitter's later attempt fails with
+  `AlreadyAnchored` — a denial-of-service on specific settlement refs. The production fix is the same
+  submitter binding already tracked above (HIGH-2 / PLAN.md Phase 18), plus per-VASP secrets.
 - **The Groth16 trusted setup was a single local contribution** (one `powersoftau contribute`, no
   multi-party ceremony, no public beacon). Whoever ran it transiently held the toxic waste for this
   circuit/verifying key; unless verifiably destroyed, that party could in principle forge a proof

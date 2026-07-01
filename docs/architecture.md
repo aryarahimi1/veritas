@@ -46,7 +46,7 @@ that moved the money**, attesting four things at once without revealing any pers
 | | Field | Why |
 |---|---|---|
 | public | `registryRoot` | so the contract can confirm both VASPs are licensed |
-| public | `settlementRef` | binds the proof to the exact Soroban payment |
+| public | `settlementRef` | binds the proof to the exact Stellar settlement payment |
 | public | `threshold` | the FATF data-sharing threshold the bracket was decided against |
 | public | `attCommitment` | regulator-openable; reveals nothing on its own |
 | private | `amount` | only the *bracket* (≥/< threshold) is provable, never the value |
@@ -56,8 +56,10 @@ that moved the money**, attesting four things at once without revealing any pers
 
 ## What's real vs. simulated
 
-- **Real:** IVMS101 format, the Soroban settlement tx (testnet USDC), the Groth16 proof, its on-chain
-  verification, the settlement binding. All independently checkable.
+- **Real:** IVMS101 format; the Stellar settlement transaction — a real testnet payment (a classic
+  `createAccount` operation in native test lumens, submitted via Horizon, standing in for the
+  production USDC leg) whose tx hash derives `settlementRef`; the Groth16 proof; its on-chain
+  verification; the settlement binding. All independently checkable.
 - **Simulated:** the participating VASPs, the licensing registry, the customer PII (synthetic), and the
   regulator view-key reveal in the demo UI — it renders a client-side simulation of what a key-holder
   would reconstruct, not an access-controlled decryption; the secret and the IVMS101 fixture ship in the
@@ -72,3 +74,15 @@ parties or **revealing** the amount, which defeats the privacy the Travel Rule i
 ZK is what lets a third party verify the *compliance computation ran correctly over private inputs*
 and produce a public, non-repudiable ✓ that leaks nothing. Remove the proof and you're back to
 trusting a private database — which is exactly the status quo Veritas replaces.
+
+## Where Veritas sits in Stellar's compliance stack
+
+Stellar already standardizes regulated flows: **SEP-12** (KYC data collection by anchors),
+**SEP-31** (cross-border payments between financial institutions — the flow class where the Travel
+Rule lives on Stellar), and **SEP-8** (regulated assets requiring issuer approval of payments).
+Off-chain IVMS101 networks (Notabene, Sygna, TRP) move the Travel-Rule PII between VASPs.
+
+None of these produce a shared, verifiable, on-chain fact that the required exchange actually
+happened and was bound to the settlement. Veritas is that missing receipt layer: a SEP-31 receiving
+anchor or a SEP-8 approval server could require a Veritas receipt before completing a transfer —
+Veritas slots into these flows rather than replacing them.

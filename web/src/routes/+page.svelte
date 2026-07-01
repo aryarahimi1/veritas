@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { anchorLive, tamperReject, readAttestation, openWithViewKey, setWallet, prewarm, preflight } from '$lib/veritas.js';
   import { TRANSFER, EXPLORER, VERITAS_CONTRACT, GROTH16_VERIFIER, PUBLIC_SIGNALS, TX } from '$lib/fixtures.js';
   import { DEMO_MODE } from '$lib/config.js';
@@ -23,6 +23,8 @@
   let tamper = null;
   let log = [];
   let health = 'checking'; // checking | ready | degraded | down — drives the TESTNET status dot
+  let vaultError = ''; // view-key open failure, rendered inside the vault card (not the compose card)
+  let freighterFellBack = false; // the user picked Freighter but the run signed with an ephemeral key
 
   let now = Date.now();
   onMount(() => {
@@ -36,12 +38,20 @@
   $: ageSec = anchoredAt ? Math.max(0, Math.floor((now - anchoredAt) / 1000)) : 0;
 
   const short = (s, n = 7) => (s && String(s).length > 2 * n ? `${String(s).slice(0, n)}…${String(s).slice(-n)}` : s ?? '—');
-  const stageLabel = { loading: 'loading proving key…', paying: 'sending settlement payment…', proving: 'generating ZK proof…', submitting: 'submitting to Stellar…' };
+  const stageLabel = {
+    loading: 'loading the proving key…',
+    paying: 'sending a real settlement payment on Stellar…',
+    proving: 'veritas.prove() — generating the ZK proof in this browser',
+    submitting: 'veritas.anchor() — the Soroban contract verifies the pairing on-chain'
+  };
 
   async function anchor() {
+    const pickedWallet = walletKind; // snapshot the choice, so a silent fallback can be disclosed after the run
     busy = true;
     error = '';
     failError = '';
+    vaultError = '';
+    freighterFellBack = false;
     cached = false;
     stage = 'loading';
     regulator = false;
@@ -52,11 +62,13 @@
       result = await anchorLive(amount, (s) => (stage = s));
       live = true;
       if (result.kind) walletKind = result.kind; // reflect a silent ephemeral fallback
+      freighterFellBack = pickedWallet === 'freighter' && result.kind === 'ephemeral';
       stage = 'anchored';
       anchoredAt = Date.now();
       txIndexed = false;
       setTimeout(() => (txIndexed = true), 6000); // let stellar.expert index the fresh tx before linking it
       log = [{ txHash: result.txHash, bracket: result.bracket, live: true, at: Date.now() }, ...log].slice(0, 6);
+      scrollToLedgers();
     } catch (e) {
       // Never blank the screen and never silently swap the amount: surface an explicit retry that
       // PRESERVES the chosen amount. The cached proof is opt-in only (showCached), so nothing on
@@ -98,21 +110,24 @@
     opened = null;
     liveRead = null;
     tamper = null;
+    vaultError = '';
+    freighterFellBack = false;
     anchoredAt = 0;
     txIndexed = true; // a previously-anchored tx is already indexed
     stage = 'anchored';
     log = [{ txHash: result.txHash, bracket: result.bracket, live: false, at: Date.now() }, ...log].slice(0, 6);
+    scrollToLedgers();
   }
 
   async function toggleRegulator() {
     if (regulator) return (regulator = false);
     busy = true;
-    error = '';
+    vaultError = '';
     try {
       if (!opened) opened = await openWithViewKey(result);
       regulator = true;
     } catch (e) {
-      error = 'Could not open attestation.';
+      vaultError = 'Could not open attestation.';
     } finally {
       busy = false;
     }
@@ -151,10 +166,25 @@
     tamper = null;
     error = '';
     failError = '';
+    vaultError = '';
+    freighterFellBack = false;
     anchoredAt = 0;
     cached = false;
     live = false;
     txIndexed = false;
+  }
+
+  // After a successful anchor (live or cached), bring the two ledgers — the payoff — into view.
+  // Skips when they are already substantially visible; honors prefers-reduced-motion.
+  async function scrollToLedgers() {
+    await tick(); // let the ledgers render before measuring
+    const el = document.querySelector('.ledgers');
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const vh = window.innerHeight || document.documentElement.clientHeight;
+    if (r.top >= 0 && r.top < vh * 0.6) return; // already substantially in view
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+    el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
   }
 
   // flatten the IVMS record safely for the reveal
@@ -240,10 +270,6 @@ const { txHash } = await veritas.anchor({ proof, settlementRef });
         FATF Recommendation 16, without putting one customer detail on-chain. The public sees a verified
         seal; a regulator holding the view key opens the full record.
       </p>
-      <div class="hero-cta">
-        <a href="#demo" class="btn primary">See the live proof</a>
-        <a class="btn ghost" href={`${EXPLORER}/contract/${VERITAS_CONTRACT}`} target="_blank" rel="noreferrer">Verify on testnet ↗</a>
-      </div>
       <aside class="figure">
         <span class="figure-n">$4.3B</span>
         <p>
@@ -252,6 +278,10 @@ const { txHash } = await veritas.anchor({ proof, settlementRef });
           check ever happened. Veritas is that proof.
         </p>
       </aside>
+      <div class="hero-cta">
+        <a href="#demo" class="btn primary">See the live proof</a>
+        <a class="btn ghost" href={`${EXPLORER}/contract/${VERITAS_CONTRACT}`} target="_blank" rel="noreferrer">Verify on testnet ↗</a>
+      </div>
     </div>
   </section>
 
@@ -289,9 +319,18 @@ const { txHash } = await veritas.anchor({ proof, settlementRef });
           <button class="seg" class:on={walletKind === 'ephemeral'} on:click={() => pickWallet('ephemeral')} disabled={busy}>Ephemeral · auto-funded</button>
           <button class="seg" class:on={walletKind === 'freighter'} on:click={() => pickWallet('freighter')} disabled={busy}>Freighter wallet</button>
         </div>
+        {#if freighterFellBack}
+          <p class="walletnote" role="status">Freighter unavailable — signed with an auto-funded ephemeral key.</p>
+        {/if}
 
         {#if stage === 'idle'}
+          <p class="preframe">One click sends a real testnet payment, proves compliance inside this browser, and anchors it in a Soroban contract — no identity, no amount, on-chain.</p>
           <button class="btn primary block" on:click={anchor} disabled={busy}>Generate ZK proof &amp; anchor on Stellar</button>
+          {#if health === 'down'}
+            <p class="healthnote err">testnet unreachable right now — a run will offer the previously anchored proof instead</p>
+          {:else if health === 'degraded'}
+            <p class="healthnote">testnet partially reachable — a live run may take a retry</p>
+          {/if}
         {:else if stage === 'failed'}
           <div class="failcard" role="alert">
             <div class="failmsg"><span class="fx" aria-hidden="true">!</span> Live run couldn't complete — {failError}.</div>
@@ -326,6 +365,7 @@ const { txHash } = await veritas.anchor({ proof, settlementRef });
               {#if live}<span class="tag ok">verified on-chain</span>{:else}<span class="tag warn">previously anchored</span>{/if}
             </div>
             <div class="verdict"><span class="vstamp" aria-hidden="true">✓</span> Travel-Rule compliant</div>
+            <p class="vsub">verified by Soroban's native BLS12-381 pairing check — ~41M of the 100M CPU budget</p>
             <dl class="filing">
               <div><dt>Originator</dt><dd class="redact" aria-label="redacted">████████████</dd></div>
               <div><dt>Beneficiary</dt><dd class="redact" aria-label="redacted">█████████</dd></div>
@@ -342,27 +382,39 @@ const { txHash } = await veritas.anchor({ proof, settlementRef });
               {/if}
               {#if live}<span class="age" role="status">confirmed {ageSec}s ago</span>{/if}
             </div>
-            {#if result.paymentTx && (cached || txIndexed)}
+            {#if result.paymentTx}
               <div class="settlebind">
                 <span class="sbl">One settlement on Stellar</span>
-                <a href={`${EXPLORER}/tx/${result.paymentTx}`} target="_blank" rel="noreferrer" class="mono">payment {short(result.paymentTx, 6)} ↗</a>
-                <span class="sarrow" aria-hidden="true">↦</span>
-                <a href={`${EXPLORER}/tx/${result.txHash}`} target="_blank" rel="noreferrer" class="mono">compliance {short(result.txHash, 6)} ↗</a>
+                {#if cached || txIndexed}
+                  <a href={`${EXPLORER}/tx/${result.paymentTx}`} target="_blank" rel="noreferrer" class="mono">payment {short(result.paymentTx, 6)} ↗</a>
+                  <span class="sarrow" aria-hidden="true">↦</span>
+                  <a href={`${EXPLORER}/tx/${result.txHash}`} target="_blank" rel="noreferrer" class="mono">compliance {short(result.txHash, 6)} ↗</a>
+                {:else}
+                  <span class="mono indexing">payment {short(result.paymentTx, 6)}</span>
+                  <span class="sarrow" aria-hidden="true">↦</span>
+                  <span class="mono indexing" role="status">compliance {short(result.txHash, 6)} · indexing…</span>
+                {/if}
                 <span class="sbl2">both bound to settlement {short(result.settlementRef, 6)}</span>
               </div>
+            {:else if live}
+              <p class="settlemiss">settlement payment unavailable this run — the proof was anchored against a fresh settlement id</p>
             {/if}
             <div class="acts">
               <button class="btn tiny" on:click={doReadLive} disabled={busy}>read live from chain</button>
-              {#if DEMO_MODE}<button class="btn tiny danger" on:click={doTamper} disabled={busy}>try to forge it</button>{/if}
+              {#if DEMO_MODE}<button class="btn sm danger" on:click={doTamper} disabled={busy}>try to forge it</button>{/if}
             </div>
+            {#if DEMO_MODE && !tamper}
+              <p class="forgehint">Don't trust the seal? Submit a forged proof — the deployed contract rejects it on-chain.</p>
+            {/if}
             {#if liveRead}
               <p class="readout mono">{liveRead.error ? 'read error' : liveRead.missing ? 'not found' : `chain → bracket=${liveRead.bracket}, submitter=${short(liveRead.submitter, 4)}, ledger=${liveRead.ledger}`}</p>
             {/if}
             {#if tamper}
               {#if tamper.rejected}
                 <div class="stamp" role="status"><span class="stamp-l">rejected on-chain</span><span class="stamp-c mono">{tamper.reason}</span></div>
+                <p class="readout">one field of the attestation was altered; the contract's pairing check refused to anchor it</p>
               {:else if tamper.running}
-                <p class="readout">submitting a tampered proof…</p>
+                <p class="readout">forging one field of the attestation, then asking the contract to accept it…</p>
               {:else if tamper.localError}
                 <p class="readout">couldn't reach contract: {tamper.localError}</p>
               {:else}
@@ -380,8 +432,9 @@ const { txHash } = await veritas.anchor({ proof, settlementRef });
             {#if !regulator}
               <div class="sealface">
                 <span class="wax" aria-hidden="true"><span class="wax-v">V</span></span>
-                <p>Encrypted to the regulator's view key. The chain holds only a commitment — no identity, no amount, no way in without the key.</p>
+                <p>Sealed to the regulator's view key. The chain holds only a commitment — no identity, no amount, no way in without the key.</p>
                 <button class="btn key" on:click={toggleRegulator} disabled={busy}>{busy ? 'opening…' : 'Apply regulator view-key'}</button>
+                {#if vaultError}<p class="verr" role="alert">{vaultError}</p>{/if}
               </div>
             {:else if rev}
               <div class="truth">
@@ -474,7 +527,7 @@ const { txHash } = await veritas.anchor({ proof, settlementRef });
       <ul class="verify-list">
         <li>
           <span class="vl-what">Veritas contract</span>
-          <span class="vl-desc">verifies the proof, anchors the compliance receipt</span>
+          <span class="vl-desc">verifies the proof, anchors the compliance receipt — ~41M of the 100M CPU budget</span>
           <a class="mono" href={`${EXPLORER}/contract/${VERITAS_CONTRACT}`} target="_blank" rel="noreferrer">{short(VERITAS_CONTRACT, 6)} ↗</a>
         </li>
         <li>
@@ -484,7 +537,7 @@ const { txHash } = await veritas.anchor({ proof, settlementRef });
         </li>
         <li>
           <span class="vl-what">Groth16 verifier</span>
-          <span class="vl-desc">the BLS12-381 pairing check, ~41M of the 100M CPU budget</span>
+          <span class="vl-desc">standalone verifier from Phase 1 — the same BLS12-381 pairing check now runs inside the Veritas contract above</span>
           <a class="mono" href={`${EXPLORER}/contract/${GROTH16_VERIFIER}`} target="_blank" rel="noreferrer">{short(GROTH16_VERIFIER, 6)} ↗</a>
         </li>
       </ul>
@@ -504,7 +557,7 @@ const { txHash } = await veritas.anchor({ proof, settlementRef });
         Real BLS12-381 Groth16 proof, generated in-browser and verified inside a Soroban contract on
         Stellar testnet. Soroban's native BLS12-381 host functions make the on-chain pairing check cost
         ~41M of the 100M CPU budget. Each run sends a real settlement payment and anchors a fresh
-        compliance transaction.
+        compliance receipt.
       </p>
     </div>
   </footer>
@@ -582,8 +635,8 @@ const { txHash } = await veritas.anchor({ proof, settlementRef });
   .eyebrow { font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.16em; color: var(--seal); font-weight: 600; margin: 0 0 1.1rem; }
   .hero h1 { font-size: clamp(2.3rem, 1.2rem + 4.4vw, 4rem); font-weight: 600; letter-spacing: -0.03em; line-height: 1.02; }
   .lede { font-size: clamp(1.05rem, 0.98rem + 0.5vw, 1.28rem); color: var(--ink-body); max-width: 60ch; margin: 1.4rem 0 0; line-height: 1.55; text-wrap: pretty; }
-  .hero-cta { display: flex; flex-wrap: wrap; gap: 0.7rem; margin-top: 2rem; }
-  .figure { max-width: 62ch; margin: clamp(2.5rem, 5vw, 3.5rem) 0 0; padding-left: 1.3rem; border-left: 2px solid var(--seal); display: grid; grid-template-columns: auto 1fr; gap: 0 1.2rem; align-items: baseline; }
+  .hero-cta { display: flex; flex-wrap: wrap; gap: 0.7rem; margin-top: clamp(1.9rem, 4vw, 2.6rem); }
+  .figure { max-width: 62ch; margin: clamp(2rem, 4.5vw, 3rem) 0 0; padding-left: 1.3rem; border-left: 2px solid var(--seal); display: grid; grid-template-columns: auto 1fr; gap: 0 1.2rem; align-items: baseline; }
   .figure-n { font-size: clamp(1.8rem, 1.2rem + 2vw, 2.6rem); font-weight: 600; color: var(--ink); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
   .figure p { margin: 0; font-size: 0.95rem; color: var(--ink-muted); }
 
@@ -598,7 +651,8 @@ const { txHash } = await veritas.anchor({ proof, settlementRef });
   .btn.sm { padding: 0.5rem 0.85rem; font-size: 0.85rem; }
   .btn.tiny { padding: 0.4rem 0.7rem; font-size: 0.8rem; background: var(--paper-sunk); color: var(--ink-body); border-color: var(--rule); border-radius: 7px; }
   .btn.tiny:hover:not(:disabled) { border-color: var(--ink-faint); }
-  .btn.tiny.danger { color: var(--seal); }
+  .btn.danger { background: var(--paper-sunk); color: var(--seal); border-color: color-mix(in oklab, var(--seal) 30%, var(--rule)); }
+  .btn.danger:hover:not(:disabled) { border-color: var(--seal); }
   .btn:disabled { opacity: 0.55; cursor: default; }
   :global(a.btn) { color: var(--paper-raised); }
   :global(a.btn.ghost) { color: var(--ink); }
@@ -637,6 +691,10 @@ const { txHash } = await veritas.anchor({ proof, settlementRef });
   .seg { font-family: inherit; background: var(--paper-sunk); color: var(--ink-muted); border: 1px solid var(--rule); padding: 0.32rem 0.7rem; font-size: 0.78rem; border-radius: 7px; cursor: pointer; }
   .seg.on { background: color-mix(in oklab, var(--blue) 12%, var(--paper-raised)); color: var(--blue-strong); border-color: color-mix(in oklab, var(--blue) 40%, var(--rule)); }
   .err { color: var(--seal); font-size: 0.84rem; margin: 0.7rem 0 0; }
+  .preframe { margin: 1.2rem 0 -0.35rem; font-size: 0.8rem; color: var(--ink-faint); max-width: 62ch; }
+  .healthnote { margin: 0.6rem 0 0; font-size: 0.78rem; color: var(--ink-muted); }
+  .healthnote.err { color: var(--seal); }
+  .walletnote { margin: 0.5rem 0 0; font-size: 0.76rem; color: var(--ink-faint); }
 
   .failcard { margin-top: 1.2rem; border: 1px solid color-mix(in oklab, var(--seal) 30%, var(--rule)); background: color-mix(in oklab, var(--seal) 6%, var(--paper-raised)); border-radius: 12px; padding: 1rem 1.15rem; }
   .failmsg { color: var(--seal-strong); font-weight: 500; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem; }
@@ -647,7 +705,7 @@ const { txHash } = await veritas.anchor({ proof, settlementRef });
   .cachedbanner b { color: var(--ink); }
 
   /* ---- two ledgers ---- */
-  .ledgers { margin-top: 1.3rem; display: grid; grid-template-columns: 1fr 1fr; gap: 1.1rem; }
+  .ledgers { margin-top: 1.3rem; scroll-margin-top: 62px; display: grid; grid-template-columns: 1fr 1fr; gap: 1.1rem; }
   .ledger { border-radius: 14px; padding: clamp(1.1rem, 2.5vw, 1.5rem); min-height: 330px; }
   .lh { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.1rem; }
   .lh-t { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.12em; }
@@ -660,7 +718,8 @@ const { txHash } = await veritas.anchor({ proof, settlementRef });
   /* public = a light institutional filing on document stock */
   .public { background: var(--paper-raised); border: 1px solid var(--rule); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--paper) 60%, transparent), 0 20px 44px -34px color-mix(in oklab, var(--ink) 45%, transparent); }
   .public .lh-t { color: var(--ink-faint); }
-  .verdict { display: flex; align-items: center; gap: 0.6rem; font-size: 1.25rem; font-weight: 600; color: var(--verify); letter-spacing: -0.01em; margin-bottom: 1.1rem; padding-bottom: 1.1rem; border-bottom: 1px solid var(--rule-soft); }
+  .verdict { display: flex; align-items: center; gap: 0.6rem; font-size: 1.25rem; font-weight: 600; color: var(--verify); letter-spacing: -0.01em; margin-bottom: 0.4rem; }
+  .vsub { margin: 0 0 1.05rem; padding-bottom: 1.05rem; border-bottom: 1px solid var(--rule-soft); font-size: 0.74rem; color: var(--ink-faint); }
   .vstamp { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; border: 1.5px solid var(--verify); color: var(--verify); font-size: 0.9rem; }
   .filing { margin: 0; display: grid; gap: 0; }
   .filing > div { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 0.42rem 0; border-bottom: 1px solid var(--rule-soft); }
@@ -679,7 +738,10 @@ const { txHash } = await veritas.anchor({ proof, settlementRef });
   .sbl { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-faint); font-weight: 600; }
   .sarrow { color: var(--ink-muted); }
   .sbl2 { flex-basis: 100%; color: var(--ink-faint); font-size: 0.72rem; }
-  .acts { display: flex; gap: 0.55rem; margin-top: 1rem; flex-wrap: wrap; }
+  .settlebind .indexing { font-size: inherit; }
+  .settlemiss { margin: 0.9rem 0 0; padding-top: 0.8rem; border-top: 1px dashed var(--rule); font-size: 0.76rem; color: var(--ink-faint); }
+  .acts { display: flex; gap: 0.55rem; margin-top: 1rem; flex-wrap: wrap; align-items: center; }
+  .forgehint { margin: 0.6rem 0 0; font-size: 0.76rem; color: var(--ink-faint); }
   .readout { margin: 0.85rem 0 0; font-size: 0.78rem; color: var(--ink-muted); }
   .readout.mono { color: var(--ink-body); }
 
@@ -698,6 +760,7 @@ const { txHash } = await veritas.anchor({ proof, settlementRef });
   .wax::before { content: ''; position: absolute; inset: -5px; border-radius: 50%; border: 1.5px dashed color-mix(in oklab, var(--seal) 55%, var(--vault)); }
   .wax-v { font-weight: 700; font-size: 1.5rem; color: color-mix(in oklab, var(--paper) 88%, var(--seal)); text-shadow: 0 1px 1px color-mix(in oklab, black 40%, transparent); }
   .sealface p { font-size: 0.84rem; color: var(--vault-muted); max-width: 32ch; margin: 0; line-height: 1.5; }
+  .sealface .verr { margin: 0; font-size: 0.78rem; color: color-mix(in oklab, var(--seal) 55%, var(--vault-ink)); }
   .btn.key { background: var(--brass); color: oklch(24% 0.04 76); font-weight: 600; border: none; }
   .btn.key:hover:not(:disabled) { background: color-mix(in oklab, var(--brass) 88%, white); }
 
@@ -769,6 +832,7 @@ const { txHash } = await veritas.anchor({ proof, settlementRef });
     .steps { grid-template-columns: 1fr; gap: 1.2rem; }
   }
   @media (max-width: 560px) {
+    .btn.block { font-size: 0.85rem; }
     .parties { grid-template-columns: 1fr; }
     .flow { transform: rotate(90deg); justify-self: start; }
     .cols { grid-template-columns: 1fr; }

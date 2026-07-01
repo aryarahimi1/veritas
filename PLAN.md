@@ -54,7 +54,7 @@ Phase 2.
 - [x] Registry root + VK pinned atomically at deploy (`__constructor`, front-run-proof)
 - [x] `submit_compliance`: real BLS12-381 Groth16 verify → bind registry + settlement + threshold → store attestation → emit `✓`
 - [x] Hardened per independent code-review + security audits (fail-fast ordering, canonicity check, TTL extension, submitter provenance)
-- [x] 10 unit tests (all negative branches + real-proof accept/reject) + on-chain integration + replay rejection
+- [x] 11 unit tests (all negative branches + real-proof accept/reject + replay rejection) + on-chain integration
 - [ ] (deferred, documented in SECURITY.md) in-circuit submitter/VASP identity binding; settlementRef→real-payment binding
 
 **✅ DoD MET — end-to-end on testnet:**
@@ -205,7 +205,7 @@ equals `pub_signals[3]`); `live-test.mjs` extended to assert the linkage. *(Paym
   (~41M/100M CPU) are the load-bearing reason; the real-payment story folded in; app hero + footer sharpened.
 
 **DoD MET:** README leads with `$4.3B`; the one-liner + why-Stellar appear on README, app hero, and footer.
-*(Still open: a screenshot/GIF of the "Two Ledgers" reveal in the README.)*
+The "Two Ledgers" reveal is captured from a real live run in `docs/media/two-ledgers.png` and embedded in the README.
 
 ## Phase 13 — Static SPA build for deployment ✅ DONE · DEMO (`625ce3c`)  *(absorbs the earlier "live hosted demo")*
 **Goal:** a static SPA anyone can open on an HTTPS URL where in-browser proving works.
