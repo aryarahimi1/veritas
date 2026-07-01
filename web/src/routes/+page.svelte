@@ -35,7 +35,7 @@
   $: ageSec = anchoredAt ? Math.max(0, Math.floor((now - anchoredAt) / 1000)) : 0;
 
   const short = (s, n = 7) => (s && String(s).length > 2 * n ? `${String(s).slice(0, n)}…${String(s).slice(-n)}` : s ?? '—');
-  const stageLabel = { loading: 'loading proving key…', proving: 'generating ZK proof…', submitting: 'submitting to Stellar…' };
+  const stageLabel = { loading: 'loading proving key…', paying: 'sending settlement payment…', proving: 'generating ZK proof…', submitting: 'submitting to Stellar…' };
 
   async function anchor() {
     busy = true;
@@ -247,6 +247,15 @@
           <a href={`${EXPLORER}/tx/${result.txHash}`} target="_blank" rel="noreferrer" class="mono">{short(result.txHash, 8)} ↗</a>
           {#if live}<span class="age" role="status">confirmed {ageSec}s ago</span>{/if}
         </div>
+        {#if result.paymentTx}
+          <div class="settlebind">
+            <span class="sbl">Settlement on Stellar</span>
+            <a href={`${EXPLORER}/tx/${result.paymentTx}`} target="_blank" rel="noreferrer" class="mono">payment {short(result.paymentTx, 6)} ↗</a>
+            <span class="sarrow">↦</span>
+            <a href={`${EXPLORER}/tx/${result.txHash}`} target="_blank" rel="noreferrer" class="mono">compliance {short(result.txHash, 6)} ↗</a>
+            <span class="dim sbl2">both bound to settlement {short(result.settlementRef, 6)}</span>
+          </div>
+        {/if}
         <div class="acts">
           <button class="ghost" on:click={doReadLive} disabled={busy}>read live from chain</button>
           {#if DEMO_MODE}<button class="ghost danger" on:click={doTamper} disabled={busy}>try to forge it</button>{/if}
@@ -374,6 +383,12 @@
   .tx{margin-top:.9rem;display:flex;align-items:center;gap:.7rem;flex-wrap:wrap}
   .public .tx a{color:#2d6cdf;text-decoration:none;font-size:.8rem}
   .age{font-size:.72rem;color:#1a7f4b;font-variant-numeric:tabular-nums}
+  .settlebind{margin-top:.7rem;display:flex;flex-wrap:wrap;align-items:center;gap:.4rem;font-size:.74rem;padding-top:.6rem;border-top:1px dashed #d9d2c4}
+  .settlebind a{text-decoration:none}
+  .public .settlebind a{color:#2d6cdf}
+  .sbl{color:#6b6555;text-transform:uppercase;letter-spacing:.04em;font-size:.62rem;font-weight:700}
+  .sarrow{color:#8a7f66}
+  .sbl2{flex-basis:100%;color:#7a7464;font-size:.7rem}
   .acts{display:flex;gap:.5rem;margin-top:.8rem}
   .public .ghost{background:#e7e0d2;color:#3a3a3a}
   .public .ghost.danger{color:#b4452f}

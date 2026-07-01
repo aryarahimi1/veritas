@@ -6,11 +6,15 @@ import { recomputeAttCommitment } from './attestation.js';
 import { encodeProof } from './proof.js';
 import { IVMS101_ATTESTATION } from './fixtures.js';
 import { parseContractError } from './errors.js';
+import { Horizon, TransactionBuilder, Operation, Memo, BASE_FEE } from '@stellar/stellar-sdk';
 
 const { basicNodeSigner } = contract;
 const RPC = import.meta.env?.VITE_RPC_URL ?? 'https://soroban-testnet.stellar.org';
 const RPC_BACKUP = import.meta.env?.VITE_RPC_URL_BACKUP ?? '';
 const FUND_SECRET = import.meta.env?.VITE_DEMO_FUND_SECRET ?? ''; // optional pre-funded testnet account
+const HORIZON = import.meta.env?.VITE_HORIZON_URL ?? 'https://horizon-testnet.stellar.org';
+const REAL_PAYMENT = (import.meta.env?.VITE_REAL_PAYMENT ?? '1') !== '0'; // bind the proof to a real payment
+const FIELD = 0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001n; // BLS12-381 scalar field r
 const { networkPassphrase, contractId } = networks.testnet;
 const WASM = '/circuit/veritas.wasm';
 const ZKEY = '/circuit/veritas_final.zkey';
@@ -145,13 +149,52 @@ export async function preflight() {
   return { assets, rpc, ok: assets && rpc, status: assets && rpc ? 'ready' : assets || rpc ? 'degraded' : 'down' };
 }
 
+// Deterministically map a Stellar tx hash (hex) to a canonical settlementRef (< r), so the settlement
+// payment and the compliance proof are bound by one shared on-chain settlement id.
+function refFromHash(hexHash) {
+  return BigInt('0x' + hexHash) % FIELD;
+}
+
+// Phase 10: send a REAL testnet settlement payment (VASP A -> a fresh beneficiary B) and return its
+// hash. createAccount is the canonical "send value to a brand-new account" op, so it always succeeds
+// against a fresh B as long as the source is funded — no pre-existing beneficiary required.
+async function sendSettlementPayment(acct) {
+  const horizon = new Horizon.Server(HORIZON);
+  const source = await horizon.loadAccount(acct.publicKey);
+  const beneficiary = Keypair.random();
+  const tx = new TransactionBuilder(source, { fee: BASE_FEE, networkPassphrase })
+    .addOperation(Operation.createAccount({ destination: beneficiary.publicKey(), startingBalance: '1.5' }))
+    .addMemo(Memo.text('Veritas settlement'))
+    .setTimeout(60)
+    .build();
+  const { signedTxXdr } = await acct.signTransaction(tx.toXDR());
+  const res = await horizon.submitTransaction(TransactionBuilder.fromXDR(signedTxXdr, networkPassphrase));
+  return { hash: res.hash, beneficiary: beneficiary.publicKey() };
+}
+
 /** The headline path: prove `amount` in-browser, submit a BRAND-NEW tx. Throws on failure (caller falls back). */
 export async function anchorLive(amount, onStep = () => {}) {
   onStep('loading');
   const snarkjs = await loadSnarkjs();
   const acct = await ensureAccount();
+
+  // Phase 10: bind the compliance proof to a REAL Stellar payment. Best-effort and feature-flagged —
+  // if the payment step fails for ANY reason, fall back to a fresh nonce so the demo never hard-fails.
+  onStep('paying');
+  let settlementRef = null;
+  let paymentTx = null;
+  if (REAL_PAYMENT) {
+    try {
+      const pay = await sendSettlementPayment(acct);
+      paymentTx = pay.hash;
+      settlementRef = refFromHash(pay.hash);
+    } catch (e) {
+      console.warn('settlement payment failed; using nonce settlementRef:', e?.message || e);
+    }
+  }
+  if (settlementRef == null) settlementRef = randomSettlementRef();
+
   onStep('proving');
-  const settlementRef = randomSettlementRef();
   const { proof, publicSignals } = await snarkjs.groth16.fullProve(buildInput(amount, settlementRef), WASM, ZKEY);
   onStep('submitting');
   const enc = encodeProof(proof);
@@ -159,6 +202,7 @@ export async function anchorLive(amount, onStep = () => {}) {
   return {
     live: true,
     txHash: sent.sendTransactionResponse?.hash,
+    paymentTx, // Phase 10: the settlement payment this proof is bound to (null if unavailable)
     account: acct.publicKey,
     kind: acct.kind, // reflects a silent ephemeral fallback
     bracket: Number(publicSignals[0]),
