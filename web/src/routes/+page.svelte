@@ -13,6 +13,7 @@
   let error = '';
   let failError = ''; // human-readable reason a live run couldn't complete (drives the retry card)
   let cached = false; // true only when the user explicitly views the previously-anchored proof
+  let txIndexed = false; // gate fresh-tx explorer links until the indexer catches up (avoid a 404)
   let result = null;
   let live = false;
   let anchoredAt = 0;
@@ -53,6 +54,8 @@
       if (result.kind) walletKind = result.kind; // reflect a silent ephemeral fallback
       stage = 'anchored';
       anchoredAt = Date.now();
+      txIndexed = false;
+      setTimeout(() => (txIndexed = true), 6000); // let stellar.expert index the fresh tx before linking it
       log = [{ txHash: result.txHash, bracket: result.bracket, live: true, at: Date.now() }, ...log].slice(0, 6);
     } catch (e) {
       // Never blank the screen and never silently swap the amount: surface an explicit retry that
@@ -96,6 +99,7 @@
     liveRead = null;
     tamper = null;
     anchoredAt = 0;
+    txIndexed = true; // a previously-anchored tx is already indexed
     stage = 'anchored';
     log = [{ txHash: result.txHash, bracket: result.bracket, live: false, at: Date.now() }, ...log].slice(0, 6);
   }
@@ -150,6 +154,7 @@
     anchoredAt = 0;
     cached = false;
     live = false;
+    txIndexed = false;
   }
 
   // flatten the IVMS record safely for the reveal
@@ -244,10 +249,14 @@
           <div><dt>Settlement</dt><dd class="mono sm">{short(result.settlementRef, 8)}</dd></div>
         </dl>
         <div class="tx">
-          <a href={`${EXPLORER}/tx/${result.txHash}`} target="_blank" rel="noreferrer" class="mono">{short(result.txHash, 8)} ↗</a>
+          {#if cached || txIndexed}
+            <a href={`${EXPLORER}/tx/${result.txHash}`} target="_blank" rel="noreferrer" class="mono">{short(result.txHash, 8)} ↗</a>
+          {:else}
+            <span class="mono indexing" role="status">{short(result.txHash, 8)} · indexing…</span>
+          {/if}
           {#if live}<span class="age" role="status">confirmed {ageSec}s ago</span>{/if}
         </div>
-        {#if result.paymentTx}
+        {#if result.paymentTx && (cached || txIndexed)}
           <div class="settlebind">
             <span class="sbl">Settlement on Stellar</span>
             <a href={`${EXPLORER}/tx/${result.paymentTx}`} target="_blank" rel="noreferrer" class="mono">payment {short(result.paymentTx, 6)} ↗</a>
@@ -384,6 +393,7 @@
   .redact{background:#1c2128;color:#1c2128;border-radius:3px;letter-spacing:-1px;user-select:none}
   .tx{margin-top:.9rem;display:flex;align-items:center;gap:.7rem;flex-wrap:wrap}
   .public .tx a{color:#2d6cdf;text-decoration:none;font-size:.8rem}
+  .indexing{font-size:.8rem;color:#8a7f66;opacity:.85}
   .age{font-size:.72rem;color:#1a7f4b;font-variant-numeric:tabular-nums}
   .settlebind{margin-top:.7rem;display:flex;flex-wrap:wrap;align-items:center;gap:.4rem;font-size:.74rem;padding-top:.6rem;border-top:1px dashed #d9d2c4}
   .settlebind a{text-decoration:none}
