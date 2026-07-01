@@ -22,7 +22,8 @@ const ZKEY = '/circuit/veritas_final.zkey';
 let _snarkjs;
 let _account; // funded once and reused
 let _wallet = 'ephemeral'; // 'ephemeral' | 'freighter'
-export const setWallet = (kind) => { _wallet = kind; _account = null; };
+let _walletGen = 0; // bumped on every explicit wallet change, to defeat a prewarm funding race
+export const setWallet = (kind) => { _wallet = kind; _account = null; _walletGen++; };
 export const getWallet = () => _wallet;
 
 async function loadSnarkjs() {
@@ -75,19 +76,25 @@ async function faucetAccount() {
 
 async function ensureAccount() {
   if (_account) return _account;
+  const gen = _walletGen; // capture the selection so a click during funding isn't clobbered (prewarm race)
+  let acct;
   if (_wallet === 'freighter') {
     try {
-      return (_account = await freighter());
+      acct = await freighter();
     } catch {
       _wallet = 'ephemeral'; // extension missing/denied/wrong-network -> graceful fallback
     }
   }
-  try {
-    return (_account = await ephemeral());
-  } catch (e) {
-    if (FUND_SECRET) return (_account = await faucetAccount()); // keep the run LIVE despite Friendbot
-    throw e;
+  if (!acct) {
+    try {
+      acct = await ephemeral();
+    } catch (e) {
+      if (!FUND_SECRET) throw e;
+      acct = await faucetAccount(); // keep the run LIVE despite Friendbot
+    }
   }
+  if (gen === _walletGen) _account = acct; // only cache if the wallet selection didn't change meanwhile
+  return acct;
 }
 
 const newClient = (acct, rpcUrl = RPC) =>
@@ -99,18 +106,23 @@ async function submitWithRetry(acct, enc, publicSignals, settlementRef) {
   const urls = RPC_BACKUP ? [RPC, RPC_BACKUP] : [RPC, RPC];
   let lastErr;
   for (const rpcUrl of urls) {
+    let tx;
     try {
-      const tx = await newClient(acct, rpcUrl).submit_compliance({
+      // build + simulate — safe to retry (nothing has been broadcast yet)
+      tx = await newClient(acct, rpcUrl).submit_compliance({
         submitter: acct.publicKey,
         proof: { a: enc.a, b: enc.b, c: enc.c },
         pub_signals: publicSignals.map((s) => BigInt(s)),
         settlement_ref: settlementRef
       });
-      return await tx.signAndSend();
     } catch (e) {
       lastErr = e;
-      if (parseContractError(String(e?.message || e))) throw e; // deterministic — do not retry
+      if (parseContractError(String(e?.message || e))) throw e; // deterministic contract error — surface now
+      continue; // transient simulate/RPC failure — retry on the next url
     }
+    // past this point the tx will be broadcast; do NOT retry a send failure (avoids a false #7 on a tx
+    // that actually anchored). A retry-worthy hiccup here surfaces as a failed run -> the user clicks Retry.
+    return await tx.signAndSend();
   }
   throw lastErr;
 }
@@ -185,11 +197,16 @@ export async function anchorLive(amount, onStep = () => {}) {
   let paymentTx = null;
   if (REAL_PAYMENT) {
     try {
-      const pay = await sendSettlementPayment(acct);
+      // cap the payment on the critical path: if Horizon is slow, degrade to a nonce ref fast rather than
+      // stalling the headline (the SDK's own submit timeout is 60s — too long for a live demo).
+      const pay = await Promise.race([
+        sendSettlementPayment(acct),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('settlement payment timed out')), 12000))
+      ]);
       paymentTx = pay.hash;
       settlementRef = refFromHash(pay.hash);
     } catch (e) {
-      console.warn('settlement payment failed; using nonce settlementRef:', e?.message || e);
+      console.warn('settlement payment unavailable; using nonce settlementRef:', e?.message || e);
     }
   }
   if (settlementRef == null) settlementRef = randomSettlementRef();
