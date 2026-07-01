@@ -8,7 +8,9 @@ import { IVMS101_ATTESTATION } from './fixtures.js';
 import { parseContractError } from './errors.js';
 
 const { basicNodeSigner } = contract;
-const RPC = 'https://soroban-testnet.stellar.org';
+const RPC = import.meta.env?.VITE_RPC_URL ?? 'https://soroban-testnet.stellar.org';
+const RPC_BACKUP = import.meta.env?.VITE_RPC_URL_BACKUP ?? '';
+const FUND_SECRET = import.meta.env?.VITE_DEMO_FUND_SECRET ?? ''; // optional pre-funded testnet account
 const { networkPassphrase, contractId } = networks.testnet;
 const WASM = '/circuit/veritas.wasm';
 const ZKEY = '/circuit/veritas_final.zkey';
@@ -59,6 +61,14 @@ async function freighter() {
   return { publicKey: address, signTransaction, kind: 'freighter' };
 }
 
+// Optional pre-funded testnet demo account (VITE_DEMO_FUND_SECRET). Used only when Friendbot funding
+// fails, so a rate-limited faucet never forces the cached fallback — the run stays a real, live tx.
+async function faucetAccount() {
+  const kp = Keypair.fromSecret(FUND_SECRET);
+  const { signTransaction } = basicNodeSigner(kp, networkPassphrase);
+  return { publicKey: kp.publicKey(), signTransaction, kind: 'faucet' };
+}
+
 async function ensureAccount() {
   if (_account) return _account;
   if (_wallet === 'freighter') {
@@ -68,11 +78,72 @@ async function ensureAccount() {
       _wallet = 'ephemeral'; // extension missing/denied/wrong-network -> graceful fallback
     }
   }
-  return (_account = await ephemeral());
+  try {
+    return (_account = await ephemeral());
+  } catch (e) {
+    if (FUND_SECRET) return (_account = await faucetAccount()); // keep the run LIVE despite Friendbot
+    throw e;
+  }
 }
 
-const newClient = (acct) =>
-  new Client({ contractId, rpcUrl: RPC, networkPassphrase, publicKey: acct.publicKey, signTransaction: acct.signTransaction });
+const newClient = (acct, rpcUrl = RPC) =>
+  new Client({ contractId, rpcUrl, networkPassphrase, publicKey: acct.publicKey, signTransaction: acct.signTransaction });
+
+// Submit with a single retry (optionally against a backup RPC) for transient RPC hiccups. A
+// deterministic contract rejection is never retried — it is surfaced immediately.
+async function submitWithRetry(acct, enc, publicSignals, settlementRef) {
+  const urls = RPC_BACKUP ? [RPC, RPC_BACKUP] : [RPC, RPC];
+  let lastErr;
+  for (const rpcUrl of urls) {
+    try {
+      const tx = await newClient(acct, rpcUrl).submit_compliance({
+        submitter: acct.publicKey,
+        proof: { a: enc.a, b: enc.b, c: enc.c },
+        pub_signals: publicSignals.map((s) => BigInt(s)),
+        settlement_ref: settlementRef
+      });
+      return await tx.signAndSend();
+    } catch (e) {
+      lastErr = e;
+      if (parseContractError(String(e?.message || e))) throw e; // deterministic — do not retry
+    }
+  }
+  throw lastErr;
+}
+
+// Warm the heavy proving assets (snarkjs, wasm, zkey) and pre-fund an account on page load, so the
+// first click is instant and the only mid-demo network surface is the final submit. Never throws.
+export async function prewarm() {
+  await Promise.allSettled([
+    loadSnarkjs().catch(() => {}),
+    fetch(WASM, { cache: 'force-cache' }).catch(() => {}),
+    fetch(ZKEY, { cache: 'force-cache' }).catch(() => {}),
+    fetch('/snarkjs.min.js', { cache: 'force-cache' }).catch(() => {}),
+    ensureAccount().catch(() => {})
+  ]);
+}
+
+// Pre-flight reachability: HEAD the three proving assets + ping the RPC, so the UI can show whether a
+// live run is safe right now. Returns { assets, rpc, ok, status: 'ready'|'degraded'|'down' }.
+export async function preflight() {
+  const ok = async (fn) => { try { return await fn(); } catch { return false; } };
+  const head = (u) => ok(async () => (await fetch(u, { method: 'HEAD' })).ok);
+  const [wasm, zkey, sj, rpc] = await Promise.all([
+    head(WASM),
+    head(ZKEY),
+    head('/snarkjs.min.js'),
+    ok(async () => {
+      const r = await fetch(RPC, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getHealth' })
+      });
+      return r.ok;
+    })
+  ]);
+  const assets = wasm && zkey && sj;
+  return { assets, rpc, ok: assets && rpc, status: assets && rpc ? 'ready' : assets || rpc ? 'degraded' : 'down' };
+}
 
 /** The headline path: prove `amount` in-browser, submit a BRAND-NEW tx. Throws on failure (caller falls back). */
 export async function anchorLive(amount, onStep = () => {}) {
@@ -84,13 +155,7 @@ export async function anchorLive(amount, onStep = () => {}) {
   const { proof, publicSignals } = await snarkjs.groth16.fullProve(buildInput(amount, settlementRef), WASM, ZKEY);
   onStep('submitting');
   const enc = encodeProof(proof);
-  const tx = await newClient(acct).submit_compliance({
-    submitter: acct.publicKey,
-    proof: { a: enc.a, b: enc.b, c: enc.c },
-    pub_signals: publicSignals.map((s) => BigInt(s)),
-    settlement_ref: settlementRef
-  });
-  const sent = await tx.signAndSend();
+  const sent = await submitWithRetry(acct, enc, publicSignals, settlementRef);
   return {
     live: true,
     txHash: sent.sendTransactionResponse?.hash,

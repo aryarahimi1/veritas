@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { anchorLive, tamperReject, readAttestation, openWithViewKey, setWallet } from '$lib/veritas.js';
+  import { anchorLive, tamperReject, readAttestation, openWithViewKey, setWallet, prewarm, preflight } from '$lib/veritas.js';
   import { TRANSFER, EXPLORER, VERITAS_CONTRACT, PUBLIC_SIGNALS, TX } from '$lib/fixtures.js';
   import { DEMO_MODE } from '$lib/config.js';
   import { contractErrorLabel } from '$lib/errors.js';
@@ -21,9 +21,14 @@
   let liveRead = null;
   let tamper = null;
   let log = [];
+  let health = 'checking'; // checking | ready | degraded | down — drives the TESTNET status dot
 
   let now = Date.now();
   onMount(() => {
+    prewarm(); // warm proving assets + pre-fund so the first live run is instant
+    preflight()
+      .then((h) => (health = h.status))
+      .catch(() => (health = 'down'));
     const i = setInterval(() => (now = Date.now()), 1000);
     return () => clearInterval(i);
   });
@@ -167,7 +172,7 @@
 </script>
 
 <div class="bar">
-  <span class="dot" /> TESTNET
+  <span class="dot" class:amber={health === 'degraded' || health === 'checking'} class:down={health === 'down'} title={health === 'ready' ? 'live proving + testnet reachable' : health === 'checking' ? 'checking reachability…' : health === 'degraded' ? 'partially reachable — a live run may fall back to cached' : 'testnet unreachable — runs will use the cached proof'} /> TESTNET
   <span class="sep">·</span>
   <span class="mono">contract {short(VERITAS_CONTRACT, 6)}</span>
   <a class="barlink" href={`${EXPLORER}/contract/${VERITAS_CONTRACT}`} target="_blank" rel="noreferrer">verify ↗</a>
@@ -305,7 +310,9 @@
   :global(body){margin:0;background:#0b0d12;color:#e9ecf2;font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;font-feature-settings:'tnum'}
   .mono{font-family:ui-monospace,'SF Mono',Menlo,monospace}
   .bar{display:flex;align-items:center;gap:.5rem;padding:.5rem 1rem;background:#0e1117;border-bottom:1px solid #1b2230;font-size:.74rem;color:#8a93a6}
-  .dot{width:7px;height:7px;border-radius:50%;background:#3ddc97;box-shadow:0 0 8px #3ddc97}
+  .dot{width:7px;height:7px;border-radius:50%;background:#3ddc97;box-shadow:0 0 8px #3ddc97;transition:background .3s}
+  .dot.amber{background:#d8a657;box-shadow:0 0 8px #d8a657}
+  .dot.down{background:#f0655a;box-shadow:0 0 8px #f0655a}
   .bar .sep{color:#39414f}
   .barlink{margin-left:auto;color:#6ea8fe;text-decoration:none}
   main{max-width:1080px;margin:0 auto;padding:2rem 1.25rem 4rem}
