@@ -35,6 +35,9 @@ stellar-keys/
 
 # Local working notes / deploy state
 HANDOFF.md
+PLAN.md
+PRODUCT.md
+docs/business.md
 .contract-id
 
 # OS

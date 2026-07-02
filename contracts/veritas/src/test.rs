@@ -35,7 +35,7 @@ fn dummy_proof(env: &Env) -> Proof {
 }
 
 /// Real Groth16/BLS12-381 verification key for `circuits/veritas.circom`, already verified on
-/// Stellar testnet (PLAN.md Phase 1/2; tx `11f2f89b…b657ef5b`, `20c48e42…`). Sourced from
+/// Stellar testnet (tx `11f2f89b…b657ef5b`, `20c48e42…`). Sourced from
 /// `circuits/build/veritas_vkey.json` and encoded via `tools/encode` (uncompressed arkworks
 /// serialization: 96B/G1, 192B/G2) — same pattern as `dummy_vk` above, real bytes instead of zeros.
 fn real_vk(env: &Env) -> VerificationKey {
@@ -322,7 +322,7 @@ fn requires_submitter_auth() {
 }
 
 /// The real positive path: a genuine Groth16/BLS12-381 proof from `circuits/veritas.circom`,
-/// already verified on Stellar testnet (PLAN.md Phase 1/2; tx `11f2f89b…b657ef5b`, `20c48e42…`),
+/// already verified on Stellar testnet (tx `11f2f89b…b657ef5b`, `20c48e42…`),
 /// goes through the full pairing check and is ACCEPTED. Every other test above is negative-path
 /// (rejection branches) or uses the all-zero `dummy_vk`/`dummy_proof`, so none of them exercise a
 /// real successful verify — this is the one that does.

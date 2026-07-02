@@ -36,7 +36,7 @@ The gap between "a sound demo of the mechanism" and "a production compliance sys
   the proof's `settlementRef` from that payment's tx hash, so the payment and the compliance proof share
   one on-chain settlement id (UI/flow linkage — two linked txs on stellar.expert). But the **circuit does
   not yet constrain** `settlementRef` to equal `H(payment from, to, amount, asset)`, so it is not
-  cryptographically bound to the payment's parties/value. *Production (PLAN.md Phase 21):* enforce that
+  cryptographically bound to the payment's parties/value. *Production:* enforce that
   equality in-circuit; the contract additionally `require_auth()`s the originating VASP to stop anonymous
   attestation-squatting.
 - **Counterparty authority.** The circuit proves the leaves are in the registry, not that the prover
@@ -90,7 +90,7 @@ after shipping. Two things not covered by the circuit/contract sections above:
   witness secret is public, anyone can generate a valid proof against the pinned registry root for
   **any** `settlementRef` and anchor it first, so the legitimate submitter's later attempt fails with
   `AlreadyAnchored` — a denial-of-service on specific settlement refs. The production fix is the same
-  submitter binding already tracked above (HIGH-2 / PLAN.md Phase 18), plus per-VASP secrets.
+  submitter binding already tracked above (HIGH-2), plus per-VASP secrets.
 - **The Groth16 trusted setup was a single local contribution** (one `powersoftau contribute`, no
   multi-party ceremony, no public beacon). Whoever ran it transiently held the toxic waste for this
   circuit/verifying key; unless verifiably destroyed, that party could in principle forge a proof

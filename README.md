@@ -132,7 +132,7 @@ acknowledgement, settlement, regulator key, amount, bracket, both leaves).
 | `contracts/veritas/` | Rust Soroban contract — the on-chain compliance anchor (11 unit tests) |
 | `tools/encode/` | snarkjs-JSON → Soroban-bytes encoder (arkworks serialization) |
 | `web/` | SvelteKit frontend — the public-✓ → regulator-reveal demo |
-| `docs/`, `SECURITY.md`, `PLAN.md` | architecture, threat model, phased build log |
+| `docs/`, `SECURITY.md` | architecture + threat model |
 
 ## Run it yourself
 
@@ -155,7 +155,7 @@ cd web && npm install && npm run dev
 
 ## Engineering & review
 
-Built in phases (see [PLAN.md](./PLAN.md)), each verified by independent code-review and
+Built in verified phases, each hardened by independent code-review and
 security audit passes. Those audits caught and fixed real issues — an unconstrained `amount`
 (ZK under-constraint), a public-signal ordering bug, and a front-runnable initializer — before this
 README was written. Honest work-in-progress over a polished mystery.

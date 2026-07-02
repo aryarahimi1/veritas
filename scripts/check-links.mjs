@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const FILES = ['README.md', 'SECURITY.md', 'PLAN.md', 'docs/architecture.md'];
+const FILES = ['README.md', 'SECURITY.md', 'docs/architecture.md'];
 const EXPLORER = 'https://stellar.expert/explorer/testnet';
 
 // On-chain surfaces the live demo links (kept in sync with web/src/lib/fixtures.js).
